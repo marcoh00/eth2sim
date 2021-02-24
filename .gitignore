@@ -1,0 +1,10 @@
+eth2spec/
+specs/
+
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+
+cryptokeys/
+state/
