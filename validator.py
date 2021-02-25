@@ -52,10 +52,33 @@ class Validator:
         )
 
     def handle_next_slot_event(self, message: NextSlotEvent):
-        pass
+        spec.on_tick(self.store, spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY + message.time)
+        # Handle last slot's attestations
+        for slot, committee_attestation_mapping in self.attestation_cache:
+            if slot < message.slot:
+                for committee, attestations in committee_attestation_mapping:
+                    remove_attestation = list()
+                    for attestation in attestations:
+                        try:
+                            spec.on_attestation(self.store, attestation)
+                            bits = 0
+                            for bit in attestation.aggregation_bits:
+                                if bit:
+                                    bits += 1
+                            if bits <= 1:
+                                remove_attestation.append(attestation)
+                        except AssertionError:
+                            print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
+                            remove_attestation.append(attestation)
+                        assert isinstance(attestations, list)
+                        remove_attestation.append(attestation)
+                    for remove in remove_attestation:
+                        attestations.remove(remove)
 
     def handle_last_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested and self.slot_last_attested < message.slot:
+            self.attest()
+        if not self.slot_last_attested:
             self.attest()
 
     def handle_aggregate_opportunity(self, message: AggregateOpportunity):
@@ -77,7 +100,6 @@ class Validator:
                 if bit:
                     aggregation_bits[idx] = 1
         aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits)
-        print(aggregation_bits)
 
         attestation = spec.Attestation(
             aggregation_bits=aggregation_bits,
@@ -95,8 +117,6 @@ class Validator:
             signature=aggregate_and_proof_signature
         )
         self.simulator.network.send(signed_aggregate_and_proof, self.index, None)
-
-        print('Collected some')
 
     def handle_attestation(self, attestation: spec.Attestation):
         print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
@@ -122,7 +142,7 @@ class Validator:
     def handle_message_event(self, message: MessageEvent):
         actions = {
             spec.Attestation: self.handle_attestation,
-            spec.AggregateAndProof: self.handle_aggregate,
+            spec.SignedAggregateAndProof: self.handle_aggregate,
             spec.BeaconBlock: self.handle_block
         }
         actions[type(message.message)](message.message)

@@ -20,4 +20,4 @@ class Network(object):
         latency = self.latency()
         latency_u64 = uint64(latency)
         time = simulator_time + latency_u64
-        self.simulator.events.put((time, MessageEvent(simulator_time, message, fromidx, toidx)))
+        self.simulator.events.put(MessageEvent(time, message, fromidx, toidx))

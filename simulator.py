@@ -57,21 +57,24 @@ class Simulator:
         self.validators.append(Validator(self, len(self.validators), privkey=privkey, pubkey=pubkey))
 
     def next_slot_event(self):
-        self.events.put((
-            (self.slot * spec.SECONDS_PER_SLOT) + spec.SECONDS_PER_SLOT,
-            NextSlotEvent(self.normalized_simulator_time(), self.slot + 1)
-        ))
+        self.events.put(
+            NextSlotEvent(
+                (self.slot * spec.SECONDS_PER_SLOT) + spec.SECONDS_PER_SLOT,
+                self.slot + 1)
+        )
 
     def next_latest_vote_opportunity(self):
         self.events.put(
-            ((self.slot * spec.SECONDS_PER_SLOT) + (spec.SECONDS_PER_SLOT // 3),
-             LatestVoteOpportunity(self.normalized_simulator_time(), self.slot))
+             LatestVoteOpportunity(
+                 (self.slot * spec.SECONDS_PER_SLOT) + (spec.SECONDS_PER_SLOT // 3),
+                 self.slot)
         )
 
     def next_aggregate_opportunity(self):
         self.events.put(
-            ((self.slot * spec.SECONDS_PER_SLOT) + (2 * (spec.SECONDS_PER_SLOT // 3)),
-             AggregateOpportunity(self.normalized_simulator_time(), self.slot))
+             AggregateOpportunity(
+                 (self.slot * spec.SECONDS_PER_SLOT) + (2 * (spec.SECONDS_PER_SLOT // 3)),
+                 self.slot)
         )
 
     def generate_genesis(self, eth1_blockhash):
@@ -105,6 +108,8 @@ class Simulator:
             validator.store = spec.get_forkchoice_store(validator.state, genesis_block)
             print(f'[STATE] Validator {validator.index}')
 
+        self.simulator_time += spec.GENESIS_DELAY
+
         for validator in self.validators:
             validator.attest()
         self.next_latest_vote_opportunity()
@@ -112,22 +117,24 @@ class Simulator:
         self.next_slot_event()
         print('[GENESIS] Alright')
 
-    def handle_next_slot_event(self, time: uint64, event: NextSlotEvent):
-        self.simulator_time = spec.MIN_GENESIS_TIME + time
+    def handle_next_slot_event(self, event: NextSlotEvent):
+        self.simulator_time = spec.MIN_GENESIS_TIME + event.time
+        for validator in self.validators:
+            validator.handle_next_slot_event(event)
         print(event)
 
-    def handle_latest_vote_opportunity(self, time: uint64, event: LatestVoteOpportunity):
-        self.simulator_time = spec.MIN_GENESIS_TIME + time
+    def handle_latest_vote_opportunity(self, event: LatestVoteOpportunity):
+        self.simulator_time = spec.MIN_GENESIS_TIME + event.time
         print(event)
 
-    def handle_aggregate_opportunity(self, time: uint64, event: AggregateOpportunity):
-        self.simulator_time = spec.MIN_GENESIS_TIME + time
+    def handle_aggregate_opportunity(self, event: AggregateOpportunity):
+        self.simulator_time = spec.MIN_GENESIS_TIME + event.time
         for validator in self.validators:
             validator.handle_aggregate_opportunity(event)
         print(event)
 
-    def handle_message_event(self, time: uint64, event: MessageEvent):
-        self.simulator_time = spec.MIN_GENESIS_TIME + time
+    def handle_message_event(self, event: MessageEvent):
+        self.simulator_time = spec.MIN_GENESIS_TIME + event.time
         if event.toidx:
             self.validators[event.toidx].handle_message_event(event)
         else:
@@ -143,11 +150,11 @@ class Simulator:
             MessageEvent: self.handle_message_event
         }
         while True:
-            next_time, next_action = self.events.get()
-            print(f'At time: {next_time}')
+            next_action = self.events.get()
+            print(f'At time: {next_action.time}')
             if isinstance(next_action, SimulationEndEvent):
                 break
-            actions[type(next_action)](next_time, next_action)
+            actions[type(next_action)](next_action)
 
 
 
@@ -175,7 +182,7 @@ def test():
     for i in range(64):
         SIMULATOR.add_validator(args.cryptokeys)
     SIMULATOR.generate_genesis(args.eth1blockhash)
-    SIMULATOR.events.put((1000, SimulationEndEvent(SIMULATOR.normalized_simulator_time(), uint64(1000))))
+    SIMULATOR.events.put(SimulationEndEvent(uint64(1000)))
     SIMULATOR.start_simulation()
 
 

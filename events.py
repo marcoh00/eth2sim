@@ -14,7 +14,7 @@ class Event:
     time: uint64
 
     def __lt__(self, other):
-        return self.time < other.time
+        return id(self.time) < id(other.time) if self.time == other.time else self.time < other.time
 
 
 @dataclass
@@ -41,4 +41,4 @@ class MessageEvent(Event):
 
 @dataclass
 class SimulationEndEvent(Event):
-    end_time: uint64
+    pass
