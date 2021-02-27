@@ -6,7 +6,7 @@ from remerkleable.basic import uint64
 from eth2spec.phase0 import spec
 
 
-MESSAGE_TYPE = Union[spec.Attestation, spec.SignedAggregateAndProof, spec.BeaconBlock]
+MESSAGE_TYPE = Union[spec.Attestation, spec.SignedAggregateAndProof, spec.SignedBeaconBlock]
 
 
 @dataclass

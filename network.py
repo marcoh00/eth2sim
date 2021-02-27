@@ -12,12 +12,9 @@ class Network(object):
         self.simulator = simulator
         self.random = np.random.RandomState(seed=rand)
 
-    def latency(self):
-        return int(max(0, np.random.normal(1, 1)))
+    def latency(self) -> uint64:
+        return uint64(int(max(0, self.random.normal(1, 1))))
 
     def send(self, message: MESSAGE_TYPE, fromidx: int, toidx: Optional[int]):
-        simulator_time = self.simulator.normalized_simulator_time()
-        latency = self.latency()
-        latency_u64 = uint64(latency)
-        time = simulator_time + latency_u64
+        time = self.simulator.simulator_time + self.latency()
         self.simulator.events.put(MessageEvent(time, message, fromidx, toidx))

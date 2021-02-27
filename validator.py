@@ -14,7 +14,9 @@ from eth_typing import BLSSignature, BLSPubkey
 
 import eth2spec.phase0.spec as spec
 import eth2spec.test.utils as utils
+from cache import AttestationCache
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent
+from helpers import popcnt
 
 
 class Validator:
@@ -29,7 +31,7 @@ class Validator:
     last_attestation_data: spec.AttestationData
     current_slot: spec.Slot
 
-    attestation_cache: Dict[spec.Slot, Dict[spec.CommitteeIndex, List[spec.Attestation]]]
+    attestation_cache: AttestationCache
 
     def __init__(self, simulator, index, privkey, pubkey):
         self.simulator = simulator
@@ -42,7 +44,7 @@ class Validator:
         self.committee = None
         self.slot_last_attested = None
         self.current_slot = spec.Slot(0)
-        self.attestation_cache = dict()
+        self.attestation_cache = AttestationCache()
 
     def update_committee(self):
         self.committee = spec.get_committee_assignment(
@@ -51,29 +53,33 @@ class Validator:
             spec.ValidatorIndex(self.index)
         )
 
+    def propose_block(self):
+        head = spec.get_head(self.store)
+        attestations = tuple(
+            self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
+        )
+        pass
+
     def handle_next_slot_event(self, message: NextSlotEvent):
-        spec.on_tick(self.store, spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY + message.time)
+        spec.on_tick(self.store, message.time)
+
+        # Keep one epoch of past attestations
+        self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
+
         # Handle last slot's attestations
-        for slot, committee_attestation_mapping in self.attestation_cache:
-            if slot < message.slot:
-                for committee, attestations in committee_attestation_mapping:
-                    remove_attestation = list()
-                    for attestation in attestations:
-                        try:
-                            spec.on_attestation(self.store, attestation)
-                            bits = 0
-                            for bit in attestation.aggregation_bits:
-                                if bit:
-                                    bits += 1
-                            if bits <= 1:
-                                remove_attestation.append(attestation)
-                        except AssertionError:
-                            print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
-                            remove_attestation.append(attestation)
-                        assert isinstance(attestations, list)
-                        remove_attestation.append(attestation)
-                    for remove in remove_attestation:
-                        attestations.remove(remove)
+        for slot, committee, attestation in self.attestation_cache.attestations(message.slot - 1):
+            try:
+                spec.on_attestation(self.store, attestation)
+                # print(f"[VALIDATOR {self.index}] ACKd Attestation by {attestation.data.index}/{attestation.aggregation_bits} for slot {attestation.data.slot}")
+            except AssertionError:
+                print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
+                self.attestation_cache.remove_attestation(slot, committee, attestation)
+
+        # Propose block if needed
+        if spec.is_proposer(self.state, spec.ValidatorIndex(self.index)):
+            print(f"[VALIDATOR {self.index}] I'M PROPOSER!!!")
+            self.propose_block()
+
 
     def handle_last_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested and self.slot_last_attested < message.slot:
@@ -90,8 +96,8 @@ class Validator:
         attestations_to_aggregate = [
             attestation
             for attestation
-            in self.attestation_cache[message.slot][self.committee[1]]
-            if attestation.data == self.last_attestation_data
+            in self.attestation_cache.attestation_cache[message.slot][self.committee[1]]
+            if attestation.data == self.last_attestation_data and popcnt(attestation.aggregation_bits) == 1
         ]
         aggregation_bits = list(0 for _ in range(len(self.committee[0])))
 
@@ -120,30 +126,28 @@ class Validator:
 
     def handle_attestation(self, attestation: spec.Attestation):
         print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
-        current_slot = spec.get_current_slot(self.store)
-        if current_slot not in self.attestation_cache:
-            self.attestation_cache[current_slot] = dict()
-        if attestation.data.index not in self.attestation_cache[current_slot]:
-            self.attestation_cache[current_slot][attestation.data.index] = list()
-        self.attestation_cache[current_slot][attestation.data.index].append(attestation)
-        try:
+        self.attestation_cache.add_attestation(attestation)
+        if spec.get_current_slot(self.store) > attestation.data.slot:
+            # Only validate attestations for previous epochs
+            # Attestations for the current epoch are validated on slot boundaries
             spec.on_attestation(self.store, attestation)
-        except AssertionError as e:
-            # Attestations from current slot only become relevant in the next slot
-            # Try again when the next slot arrives
-            print(f'[Validator {self.index}] ATTESTATION INVALID ({str(e)})')
 
-    def handle_aggregate(self, aggregate: spec.AggregateAndProof):
-        pass
+    def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
+        # TODO check signature
+        self.handle_attestation(aggregate.message.aggregate)
 
-    def handle_block(self, block: spec.BeaconBlock):
-        pass
+    def handle_block(self, block: spec.SignedBeaconBlock):
+        spec.on_block(self.store, block)
+        spec.state_transition(self.state, block)
+        for attestation in block.message.body.attestations:
+            self.attestation_cache.add_attestation(attestation, from_block=True)
+        print(f"Handled block {block.message.state_root}")
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
             spec.Attestation: self.handle_attestation,
             spec.SignedAggregateAndProof: self.handle_aggregate,
-            spec.BeaconBlock: self.handle_block
+            spec.SignedBeaconBlock: self.handle_block
         }
         actions[type(message.message)](message.message)
 
