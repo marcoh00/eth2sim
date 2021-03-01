@@ -126,6 +126,8 @@ class Simulator:
         print(event)
 
     def handle_latest_vote_opportunity(self, event: LatestVoteOpportunity):
+        for validator in self.validators:
+            validator.handle_latest_voting_opportunity(event)
         print(event)
 
     def handle_aggregate_opportunity(self, event: AggregateOpportunity):

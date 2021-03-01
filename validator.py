@@ -30,6 +30,7 @@ class Validator:
     slot_last_attested: spec.Slot
     last_attestation_data: spec.AttestationData
     current_slot: spec.Slot
+    proposer_current_slot: Optional[spec.ValidatorIndex]
 
     attestation_cache: AttestationCache
 
@@ -45,15 +46,16 @@ class Validator:
         self.slot_last_attested = None
         self.current_slot = spec.Slot(0)
         self.attestation_cache = AttestationCache()
+        self.proposer_current_slot = None
 
     def update_committee(self):
         self.committee = spec.get_committee_assignment(
             self.state,
-            spec.get_current_epoch(self.state),
+            spec.compute_epoch_at_slot(self.simulator.slot),
             spec.ValidatorIndex(self.index)
         )
 
-    def propose_block(self):
+    def propose_block(self, head_state: spec.BeaconState):
         head = spec.get_head(self.store)
         attestations = tuple(
             self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
@@ -62,6 +64,10 @@ class Validator:
 
     def handle_next_slot_event(self, message: NextSlotEvent):
         spec.on_tick(self.store, message.time)
+        if message.slot % spec.SLOTS_PER_EPOCH == 0:
+            self.update_committee()
+            print(f"{message.slot // spec.SLOTS_PER_EPOCH} -------------------------------------------------------------------------------------------------------------------------------------------------------------")
+            # print(f"{message.slot // spec.SLOTS_PER_EPOCH} !!!!!! NEW EPOCH ARRIVED !!!!!! {message.slot // spec.SLOTS_PER_EPOCH}")
 
         # Keep one epoch of past attestations
         self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
@@ -75,16 +81,21 @@ class Validator:
                 print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
                 self.attestation_cache.remove_attestation(slot, committee, attestation)
 
+        # Advance state for checking
+        head_state = self.state.copy()
+        if head_state.slot < message.slot:
+            spec.process_slots(head_state, message.slot)
+        self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
+
         # Propose block if needed
-        if spec.is_proposer(self.state, spec.ValidatorIndex(self.index)):
+        if spec.ValidatorIndex(self.index) == self.proposer_current_slot:
             print(f"[VALIDATOR {self.index}] I'M PROPOSER!!!")
-            self.propose_block()
+            self.propose_block(head_state)
 
-
-    def handle_last_voting_opportunity(self, message: LatestVoteOpportunity):
+    def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested and self.slot_last_attested < message.slot:
             self.attest()
-        if not self.slot_last_attested:
+        if self.slot_last_attested is None:
             self.attest()
 
     def handle_aggregate_opportunity(self, message: AggregateOpportunity):
@@ -126,7 +137,13 @@ class Validator:
 
     def handle_attestation(self, attestation: spec.Attestation):
         print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
-        self.attestation_cache.add_attestation(attestation)
+        current_epoch = spec.get_current_epoch(self.state)
+        previous_epoch = spec.get_previous_epoch(self.state)
+        attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
+        if attestation_epoch >= previous_epoch:
+            self.attestation_cache.add_attestation(attestation)
+        else:
+            print(f"[WARNING] Validator {self.index} received Attestation for the past")
         if spec.get_current_slot(self.store) > attestation.data.slot:
             # Only validate attestations for previous epochs
             # Attestations for the current epoch are validated on slot boundaries
@@ -154,18 +171,18 @@ class Validator:
     def attest(self):
         if not self.committee:
             self.update_committee()
-        if not (self.state.slot == self.committee[2] and self.index in self.committee[0]):
+        if not (self.simulator.slot == self.committee[2] and self.index in self.committee[0]):
             return None
         head_block = self.store.blocks[spec.get_head(self.store)]
         head_state = self.state.copy()
-        while head_state.slot < head_block.slot:
-            spec.process_slot(head_state)
+        if head_state.slot < self.simulator.slot:
+            spec.process_slots(head_state, self.simulator.slot)
 
         # From validator spec / Attesting / Note
         start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
         epoch_boundary_block_root = spec.hash_tree_root(head_block) \
             if start_slot == head_state.slot \
-            else spec.get_block_root(self.state, spec.get_current_epoch(head_state))
+            else spec.get_block_root(head_state, spec.get_current_epoch(head_state))
 
         attestation_data = spec.AttestationData(
             slot=self.committee[2],
@@ -186,7 +203,7 @@ class Validator:
         )
 
         self.last_attestation_data = attestation_data
-        self.slot_last_attested = self.state.slot
+        self.slot_last_attested = head_state.slot
         self.simulator.network.send(attestation, self.index, None)
 
     def save_state(self, outdir: pathlib.Path):
