@@ -28,6 +28,7 @@ class Simulator:
         self.validators = []
         self.network = Network(self, int.from_bytes(rand[0:4], "little"))
         self.events = queue.PriorityQueue()
+        self.past_events = list()
         self.random = rand
 
     def normalized_simulator_time(self):
@@ -152,6 +153,7 @@ class Simulator:
         }
         while True:
             next_action = self.events.get()
+            self.past_events.append(next_action)
             print(f'At time: {next_action.time}')
             if isinstance(next_action, SimulationEndEvent):
                 break
@@ -167,7 +169,7 @@ def test():
     parser.add_argument('--configname', type=str, required=False, default='minimal')
     parser.add_argument('--cryptokeys', type=valid_writable_path, required=False, default='./cryptokeys')
     # parser.add_argument('--state', type=valid_writable_path, required=False, default='./state')
-    parser.add_argument('--eth1blockhash', type=bytes, required=False, default=random.randbytes(32))
+    parser.add_argument('--eth1blockhash', type=bytes.fromhex, required=False, default=random.randbytes(32).hex())
     args = parser.parse_args()
     config_util.prepare_config(args.configpath, args.configname)
     # noinspection PyTypeChecker
@@ -177,7 +179,7 @@ def test():
 
     print('Ethereum 2.0 Beacon Chain Simulator')
     print(f'Beacon Chain Configuration: {spec.CONFIG_NAME}')
-    print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash}')
+    print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
     # print(f'State Backup: {args.state}')
 

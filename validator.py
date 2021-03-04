@@ -57,9 +57,49 @@ class Validator:
 
     def propose_block(self, head_state: spec.BeaconState):
         head = spec.get_head(self.store)
-        attestations = tuple(
+        candidate_attestations = tuple(
             self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
         )
+        block = spec.BeaconBlock(
+            slot=head_state.slot,
+            proposer_index=spec.ValidatorIndex(self.index),
+            parent_root=head,
+            state_root=spec.Bytes32(bytes(0 for _ in range(0, 32)))
+        )
+        randao_reveal = spec.get_epoch_signature(head_state, block, self.privkey)
+        eth1_data = head_state.eth1_data
+
+        # TODO implement slashings
+        proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list()
+        attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list()
+        attestations: List[spec.Attestation, spec.MAX_ATTESTATIONS] = list()
+        if len(candidate_attestations) <= spec.MAX_ATTESTATIONS:
+            attestations = candidate_attestations
+        else:
+            attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
+
+        deposits: List[spec.Deposit, spec.MAX_DEPOSITS] = list()
+        voluntary_exits: List[spec.VoluntaryExit, spec.MAX_VOLUNTARY_EXITS] = list()
+
+        body = spec.BeaconBlockBody(
+            randao_reveal=randao_reveal,
+            eth1_data=eth1_data,
+            graffiti=spec.Bytes32(bytes(255 for _ in range(0, 32))),
+            proposer_slashings=proposer_slashings,
+            attester_slashings=attester_slashings,
+            attestations=attestations,
+            deposits=deposits,
+            voluntary_exits=voluntary_exits
+        )
+        block.body = body
+        new_state_root = spec.compute_new_state_root(self.state, block)
+        block.state_root = new_state_root
+        signed_block = spec.SignedBeaconBlock(
+            message=block,
+            signature=spec.get_block_signature(self.state, block, self.privkey)
+        )
+
+        self.simulator.network.send(signed_block, self.index, None)
         pass
 
     def handle_next_slot_event(self, message: NextSlotEvent):
@@ -93,10 +133,14 @@ class Validator:
             self.propose_block(head_state)
 
     def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
-        if self.slot_last_attested and self.slot_last_attested < message.slot:
-            self.attest()
+        if self.index == 48 and self.simulator.slot == spec.Slot(10):
+            print('48 should vote')
         if self.slot_last_attested is None:
             self.attest()
+            return
+        if self.slot_last_attested < message.slot:
+            self.attest()
+
 
     def handle_aggregate_opportunity(self, message: AggregateOpportunity):
         if not self.slot_last_attested == message.slot:
@@ -117,6 +161,8 @@ class Validator:
                 if bit:
                     aggregation_bits[idx] = 1
         aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits)
+        if not popcnt(aggregation_bits) == 4:
+            print('WARNING')
 
         attestation = spec.Attestation(
             aggregation_bits=aggregation_bits,
@@ -137,7 +183,6 @@ class Validator:
 
     def handle_attestation(self, attestation: spec.Attestation):
         print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
-        current_epoch = spec.get_current_epoch(self.state)
         previous_epoch = spec.get_previous_epoch(self.state)
         attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
         if attestation_epoch >= previous_epoch:

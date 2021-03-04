@@ -13,7 +13,8 @@ class Network(object):
         self.random = np.random.RandomState(seed=rand)
 
     def latency(self) -> uint64:
-        return uint64(int(max(0, self.random.normal(1, 1))))
+        # return uint64(int(max(0, self.random.normal(1, 1))))
+        return uint64(0)
 
     def send(self, message: MESSAGE_TYPE, fromidx: int, toidx: Optional[int]):
         time = self.simulator.simulator_time + self.latency()
