@@ -15,7 +15,7 @@ from eth_typing import BLSSignature, BLSPubkey
 import eth2spec.phase0.spec as spec
 import eth2spec.test.utils as utils
 from cache import AttestationCache
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent
+from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE
 from helpers import popcnt
 
 
@@ -29,13 +29,13 @@ class Validator:
     committee: Optional[Tuple[Sequence[spec.ValidatorIndex], spec.CommitteeIndex, spec.Slot]]
     slot_last_attested: spec.Slot
     last_attestation_data: spec.AttestationData
+
     current_slot: spec.Slot
     proposer_current_slot: Optional[spec.ValidatorIndex]
 
     attestation_cache: AttestationCache
 
-    def __init__(self, simulator, index, privkey, pubkey):
-        self.simulator = simulator
+    def __init__(self, index, privkey, pubkey):
         self.index = index
         self.privkey = privkey
         self.pubkey = pubkey
@@ -51,11 +51,12 @@ class Validator:
     def update_committee(self):
         self.committee = spec.get_committee_assignment(
             self.state,
-            spec.compute_epoch_at_slot(self.simulator.slot),
+            spec.compute_epoch_at_slot(self.current_slot),
             spec.ValidatorIndex(self.index)
         )
 
-    def propose_block(self, head_state: spec.BeaconState):
+    def propose_block(self, head_state: spec.BeaconState)\
+            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
         head = spec.get_head(self.store)
         candidate_attestations = tuple(
             self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
@@ -98,11 +99,11 @@ class Validator:
             message=block,
             signature=spec.get_block_signature(self.state, block, self.privkey)
         )
+        return spec.ValidatorIndex(self.index), None, signed_block
 
-        self.simulator.network.send(signed_block, self.index, None)
-        pass
-
-    def handle_next_slot_event(self, message: NextSlotEvent):
+    def handle_next_slot_event(self, message: NextSlotEvent)\
+            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
+        self.current_slot = message.slot
         spec.on_tick(self.store, message.time)
         if message.slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee()
@@ -130,19 +131,21 @@ class Validator:
         # Propose block if needed
         if spec.ValidatorIndex(self.index) == self.proposer_current_slot:
             print(f"[VALIDATOR {self.index}] I'M PROPOSER!!!")
-            self.propose_block(head_state)
+            return self.propose_block(head_state)
+        return None
 
-    def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
-        if self.index == 48 and self.simulator.slot == spec.Slot(10):
-            print('48 should vote')
+    def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity)\
+            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
+        self.current_slot = message.slot
         if self.slot_last_attested is None:
-            self.attest()
-            return
+            return self.attest()
         if self.slot_last_attested < message.slot:
-            self.attest()
+            return self.attest()
+        return None
 
-
-    def handle_aggregate_opportunity(self, message: AggregateOpportunity):
+    def handle_aggregate_opportunity(self, message: AggregateOpportunity)\
+            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
+        self.current_slot = message.slot
         if not self.slot_last_attested == message.slot:
             return
         slot_signature = spec.get_slot_signature(self.state, message.slot, self.privkey)
@@ -179,7 +182,7 @@ class Validator:
             message=aggregate_and_proof,
             signature=aggregate_and_proof_signature
         )
-        self.simulator.network.send(signed_aggregate_and_proof, self.index, None)
+        return spec.ValidatorIndex(self.index), None, signed_aggregate_and_proof
 
     def handle_attestation(self, attestation: spec.Attestation):
         print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
@@ -213,15 +216,15 @@ class Validator:
         }
         actions[type(message.message)](message.message)
 
-    def attest(self):
+    def attest(self) -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
         if not self.committee:
             self.update_committee()
-        if not (self.simulator.slot == self.committee[2] and self.index in self.committee[0]):
+        if not (self.current_slot == self.committee[2] and self.index in self.committee[0]):
             return None
         head_block = self.store.blocks[spec.get_head(self.store)]
         head_state = self.state.copy()
-        if head_state.slot < self.simulator.slot:
-            spec.process_slots(head_state, self.simulator.slot)
+        if head_state.slot < self.current_slot:
+            spec.process_slots(head_state, self.current_slot)
 
         # From validator spec / Attesting / Note
         start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
@@ -249,7 +252,7 @@ class Validator:
 
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
-        self.simulator.network.send(attestation, self.index, None)
+        return spec.ValidatorIndex(self.index), None, attestation
 
     def save_state(self, outdir: pathlib.Path):
         with open(outdir / f'{self.index}.state', 'wb') as statefp:

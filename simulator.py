@@ -2,7 +2,7 @@ import argparse
 import queue
 import random
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Sequence, List
 from py_ecc.bls import G2ProofOfPossession as Bls
 from py_ecc.bls12_381 import curve_order
 from eth_typing import BLSSignature, BLSPubkey
@@ -13,7 +13,7 @@ import eth2spec.phase0.spec as spec
 import eth2spec.test.utils as utils
 from eth2spec.config import config_util
 from eth2spec.test.helpers.deposits import build_deposit
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent
+from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, Event
 from network import Network
 from pathvalidation import valid_writable_path
 from validator import Validator
@@ -21,6 +21,16 @@ from importlib import reload
 
 
 class Simulator:
+
+    genesis_time: uint64
+    simulator_time: uint64
+    slot: spec.Slot
+    validators: List[Validator]
+    network: Network
+    events: queue.Queue[Event]
+    past_events: List[Event]
+    random: ByteVector
+
     def __init__(self, rand: ByteVector):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
@@ -56,7 +66,7 @@ class Simulator:
                 pubkey_file.write_bytes(pubkey)
                 privkey_file.write_text(str(privkey))
         print(f'[CREATE] Validator {len(self.validators)}')
-        self.validators.append(Validator(self, len(self.validators), privkey=privkey, pubkey=pubkey))
+        self.validators.append(Validator(len(self.validators), privkey=privkey, pubkey=pubkey))
 
     def next_slot_event(self):
         self.events.put(
@@ -111,7 +121,9 @@ class Simulator:
             print(f'[STATE] Validator {validator.index}')
 
         for validator in self.validators:
-            validator.attest()
+            optional_attestation = validator.attest()
+            if optional_attestation is not None:
+                self.network.send(*optional_attestation)
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
@@ -123,22 +135,29 @@ class Simulator:
         self.next_aggregate_opportunity()
         self.next_slot_event()
         for validator in self.validators:
-            validator.handle_next_slot_event(event)
+            optional_block = validator.handle_next_slot_event(event)
+            if optional_block is not None:
+                self.network.send(*optional_block)
         print(event)
 
     def handle_latest_vote_opportunity(self, event: LatestVoteOpportunity):
         for validator in self.validators:
-            validator.handle_latest_voting_opportunity(event)
+            optional_vote = validator.handle_latest_voting_opportunity(event)
+            if optional_vote is not None:
+                self.network.send(*optional_vote)
         print(event)
 
     def handle_aggregate_opportunity(self, event: AggregateOpportunity):
         for validator in self.validators:
-            validator.handle_aggregate_opportunity(event)
+            optional_aggregate = validator.handle_aggregate_opportunity(event)
+            if optional_aggregate is not None:
+                self.network.send(*optional_aggregate)
         print(event)
 
     def handle_message_event(self, event: MessageEvent):
         if event.toidx:
-            self.validators[event.toidx].handle_message_event(event)
+            for toidx in event.toidx:
+                self.validators[toidx].handle_message_event(event)
         else:
             for validator in self.validators:
                 validator.handle_message_event(event)

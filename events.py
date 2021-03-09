@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Sequence
 
 from remerkleable.basic import uint64
 
@@ -35,8 +35,8 @@ class AggregateOpportunity(Event):
 @dataclass
 class MessageEvent(Event):
     message: MESSAGE_TYPE
-    fromidx: int
-    toidx: Optional[int]
+    fromidx: spec.ValidatorIndex
+    toidx: Optional[Sequence[spec.ValidatorIndex]]
 
 
 @dataclass
