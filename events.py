@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Optional, Union, Sequence
+from typing import Optional, Union, Sequence
 
 from remerkleable.basic import uint64
 

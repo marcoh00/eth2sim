@@ -1,19 +1,10 @@
-import pathlib
-import random
-from typing import Tuple, Sequence, Optional, Dict, List
+from typing import Tuple, Sequence, Optional, List
 
 from remerkleable.basic import uint64
 from remerkleable.bitfields import Bitlist
-from remerkleable.complex import Container
+from eth_typing import BLSPubkey
 
 import eth2spec.phase0.spec as spec
-
-from py_ecc.bls import G2ProofOfPossession as Bls
-from py_ecc.bls12_381 import curve_order
-from eth_typing import BLSSignature, BLSPubkey
-
-import eth2spec.phase0.spec as spec
-import eth2spec.test.utils as utils
 from cache import AttestationCache
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE
 from helpers import popcnt
@@ -27,7 +18,7 @@ class Validator:
     store: spec.Store
 
     committee: Optional[Tuple[Sequence[spec.ValidatorIndex], spec.CommitteeIndex, spec.Slot]]
-    slot_last_attested: spec.Slot
+    slot_last_attested: Optional[spec.Slot]
     last_attestation_data: spec.AttestationData
 
     current_slot: spec.Slot
@@ -41,7 +32,6 @@ class Validator:
         self.pubkey = pubkey
 
         self.state = spec.BeaconState()
-        self.store = None
         self.committee = None
         self.slot_last_attested = None
         self.current_slot = spec.Slot(0)
@@ -73,7 +63,6 @@ class Validator:
         # TODO implement slashings
         proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list()
         attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list()
-        attestations: List[spec.Attestation, spec.MAX_ATTESTATIONS] = list()
         if len(candidate_attestations) <= spec.MAX_ATTESTATIONS:
             attestations = candidate_attestations
         else:
@@ -107,8 +96,7 @@ class Validator:
         spec.on_tick(self.store, message.time)
         if message.slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee()
-            print(f"{message.slot // spec.SLOTS_PER_EPOCH} -------------------------------------------------------------------------------------------------------------------------------------------------------------")
-            # print(f"{message.slot // spec.SLOTS_PER_EPOCH} !!!!!! NEW EPOCH ARRIVED !!!!!! {message.slot // spec.SLOTS_PER_EPOCH}")
+            print(f"{message.slot // spec.SLOTS_PER_EPOCH} -----------------------------------------------------------")
 
         # Keep one epoch of past attestations
         self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
@@ -117,7 +105,6 @@ class Validator:
         for slot, committee, attestation in self.attestation_cache.attestations(message.slot - 1):
             try:
                 spec.on_attestation(self.store, attestation)
-                # print(f"[VALIDATOR {self.index}] ACKd Attestation by {attestation.data.index}/{attestation.aggregation_bits} for slot {attestation.data.slot}")
             except AssertionError:
                 print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
                 self.attestation_cache.remove_attestation(slot, committee, attestation)
@@ -163,6 +150,7 @@ class Validator:
             for idx, bit in enumerate(attestation.aggregation_bits):
                 if bit:
                     aggregation_bits[idx] = 1
+        # noinspection PyArgumentList
         aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits)
         if not popcnt(aggregation_bits) == 4:
             print('WARNING')
@@ -214,6 +202,7 @@ class Validator:
             spec.SignedAggregateAndProof: self.handle_aggregate,
             spec.SignedBeaconBlock: self.handle_block
         }
+        # noinspection PyArgumentList
         actions[type(message.message)](message.message)
 
     def attest(self) -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
@@ -242,6 +231,7 @@ class Validator:
 
         aggregation_bits_list = list(0 for _ in range(0, len(self.committee[0])))
         aggregation_bits_list[self.committee[0].index(self.index)] = 1
+        # noinspection PyArgumentList
         aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits_list)
 
         attestation = spec.Attestation(
@@ -253,15 +243,3 @@ class Validator:
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
         return spec.ValidatorIndex(self.index), None, attestation
-
-    def save_state(self, outdir: pathlib.Path):
-        with open(outdir / f'{self.index}.state', 'wb') as statefp:
-            statefp.write(self.state.encode_bytes())
-        with open(outdir / f'{self.index}.store', 'wb') as storefp:
-            storefp.write(Container.encode_bytes(self.store))
-
-    def load_state(self, dir: pathlib.Path):
-        with open(dir / f'{self.index}.state', 'rb') as statefp:
-            self.state = spec.BeaconState.decode_bytes(statefp.read())
-        # with open(dir / f'{self.index}.store', 'rb') as storefp:
-        #     self.state = Container.decode_bytes(spec.Store, storefp.read())

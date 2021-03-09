@@ -14,7 +14,7 @@ class AttestationCache:
         self.attestation_cache = dict()
         self.seen_in_block = dict()
 
-    def add_attestation(self, attestation: spec.Attestation, from_block: bool=False):
+    def add_attestation(self, attestation: spec.Attestation, from_block: bool = False):
         slot = attestation.data.slot
         committee = attestation.data.index
 
@@ -39,7 +39,8 @@ class AttestationCache:
                 for committee in commitee_mapping.keys():
                     yield from self.attestations_with_unseen_validators(slot, committee)
 
-    def attestations_with_unseen_validators(self, slot: spec.Slot, committee: spec.CommitteeIndex) -> List[spec.Attestation]:
+    def attestations_with_unseen_validators(self, slot: spec.Slot, committee: spec.CommitteeIndex)\
+            -> List[spec.Attestation]:
         attestations = self.attestation_cache[slot][committee]\
             if slot in self.attestation_cache and committee in self.attestation_cache[slot]\
             else list()
@@ -86,7 +87,7 @@ class AttestationCache:
     def clean_redundant_attestations(self):
         for slot, committee_attestation_map in self.attestation_cache.items():
             for committee, attestations in committee_attestation_map.items():
-                attestations.sort(key=lambda attestation: popcnt(attestation.aggregation_bits), reverse=True)
+                attestations.sort(key=lambda a: popcnt(a.aggregation_bits), reverse=True)
                 keep: List[spec.Attestation] = list()
                 for attestation in attestations:
                     current_attestation_indexes = indices_inside_committee(attestation.aggregation_bits)

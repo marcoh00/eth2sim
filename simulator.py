@@ -2,15 +2,13 @@ import argparse
 import queue
 import random
 from pathlib import Path
-from typing import Optional, Sequence, List
+from typing import Optional, List
 from py_ecc.bls import G2ProofOfPossession as Bls
 from py_ecc.bls12_381 import curve_order
-from eth_typing import BLSSignature, BLSPubkey
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 import eth2spec.phase0.spec as spec
-import eth2spec.test.utils as utils
 from eth2spec.config import config_util
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, Event
@@ -168,7 +166,8 @@ class Simulator:
             NextSlotEvent: self.handle_next_slot_event,
             LatestVoteOpportunity: self.handle_latest_vote_opportunity,
             AggregateOpportunity: self.handle_aggregate_opportunity,
-            MessageEvent: self.handle_message_event
+            MessageEvent: self.handle_message_event,
+            Event: lambda event: None
         }
         while True:
             next_action = self.events.get()
@@ -179,7 +178,6 @@ class Simulator:
             assert self.simulator_time <= next_action.time
             self.simulator_time = next_action.time
             actions[type(next_action)](next_action)
-
 
 
 def test():
@@ -193,7 +191,7 @@ def test():
     config_util.prepare_config(args.configpath, args.configname)
     # noinspection PyTypeChecker
     reload(spec)
-    SIMULATOR = Simulator(args.eth1blockhash)
+    simulator = Simulator(args.eth1blockhash)
     spec.bls.bls_active = False
 
     print('Ethereum 2.0 Beacon Chain Simulator')
@@ -203,11 +201,10 @@ def test():
     # print(f'State Backup: {args.state}')
 
     for i in range(64):
-        SIMULATOR.add_validator(args.cryptokeys)
-    SIMULATOR.generate_genesis(args.eth1blockhash)
-    SIMULATOR.events.put(SimulationEndEvent(SIMULATOR.genesis_time + uint64(1000)))
-    SIMULATOR.start_simulation()
+        simulator.add_validator(args.cryptokeys)
+    simulator.generate_genesis(args.eth1blockhash)
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(1000)))
+    simulator.start_simulation()
 
 
 test()
-
