@@ -1,8 +1,10 @@
 import argparse
 import queue
 import random
+import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Sequence
 from py_ecc.bls import G2ProofOfPossession as Bls
 from py_ecc.bls12_381 import curve_order
 from remerkleable.basic import uint64
@@ -11,7 +13,8 @@ from remerkleable.byte_arrays import ByteVector
 import eth2spec.phase0.spec as spec
 from eth2spec.config import config_util
 from eth2spec.test.helpers.deposits import build_deposit
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, Event
+from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
+    Event, MESSAGE_TYPE
 from network import Network
 from pathvalidation import valid_writable_path
 from validator import Validator
@@ -121,13 +124,16 @@ class Simulator:
         for validator in self.validators:
             optional_attestation = validator.attest()
             if optional_attestation is not None:
-                self.network.send(*optional_attestation)
+                self.__handle_validator_message_event(*optional_attestation)
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
         print('[GENESIS] Alright')
 
     def handle_next_slot_event(self, event: NextSlotEvent):
+        if event.slot % spec.SLOTS_PER_EPOCH == 0:
+            print("---------- EPOCH BOUNDARY ----------")
+        print(f"!!! SLOT {event.slot} !!!")
         self.slot += 1
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
@@ -135,33 +141,26 @@ class Simulator:
         for validator in self.validators:
             optional_block = validator.handle_next_slot_event(event)
             if optional_block is not None:
-                self.network.send(*optional_block)
-        print(event)
+                self.__handle_validator_message_event(*optional_block)
+                print(optional_block[2])
 
     def handle_latest_vote_opportunity(self, event: LatestVoteOpportunity):
         for validator in self.validators:
             optional_vote = validator.handle_latest_voting_opportunity(event)
             if optional_vote is not None:
-                self.network.send(*optional_vote)
-        print(event)
+                self.__handle_validator_message_event(*optional_vote)
 
     def handle_aggregate_opportunity(self, event: AggregateOpportunity):
         for validator in self.validators:
             optional_aggregate = validator.handle_aggregate_opportunity(event)
             if optional_aggregate is not None:
-                self.network.send(*optional_aggregate)
-        print(event)
+                self.__handle_validator_message_event(*optional_aggregate)
 
     def handle_message_event(self, event: MessageEvent):
-        if event.toidx:
-            for toidx in event.toidx:
-                self.validators[toidx].handle_message_event(event)
-        else:
-            for validator in self.validators:
-                validator.handle_message_event(event)
-        print(event)
+        self.validators[event.toidx].handle_message_event(event)
 
     def start_simulation(self):
+        last_time = uint64(0)
         actions = {
             NextSlotEvent: self.handle_next_slot_event,
             LatestVoteOpportunity: self.handle_latest_vote_opportunity,
@@ -172,13 +171,30 @@ class Simulator:
         while True:
             next_action = self.events.get()
             self.past_events.append(next_action)
-            print(f'At time: {next_action.time}')
+
+            if next_action.time > last_time:
+                print(f'At time: {next_action.time}')
+                last_time = next_action.time
+
             if isinstance(next_action, SimulationEndEvent):
                 break
             assert self.simulator_time <= next_action.time
             self.simulator_time = next_action.time
             actions[type(next_action)](next_action)
 
+    def __handle_validator_message_event(self,
+                                         fromidx: spec.ValidatorIndex,
+                                         toidx: Optional[Sequence[spec.ValidatorIndex]],
+                                         message: MESSAGE_TYPE):
+        if toidx:
+            for validatoridx in toidx:
+                self.network.send(fromidx, validatoridx, message)
+        else:
+            for validator in self.validators:
+                self.network.send(fromidx, spec.ValidatorIndex(validator.index), message)
+
+
+SIMULATOR = [Simulator(random.randbytes(32)),]
 
 def test():
     parser = argparse.ArgumentParser()
@@ -191,7 +207,8 @@ def test():
     config_util.prepare_config(args.configpath, args.configname)
     # noinspection PyTypeChecker
     reload(spec)
-    simulator = Simulator(args.eth1blockhash)
+    SIMULATOR[0] = Simulator(args.eth1blockhash)
+    simulator = SIMULATOR[0]
     spec.bls.bls_active = False
 
     print('Ethereum 2.0 Beacon Chain Simulator')
@@ -203,8 +220,15 @@ def test():
     for i in range(64):
         simulator.add_validator(args.cryptokeys)
     simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(1000)))
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(500)))
     simulator.start_simulation()
 
 
-test()
+if __name__ == '__main__':
+    start = datetime.now()
+    try:
+        test()
+        end = datetime.now()
+    except KeyboardInterrupt:
+        end = datetime.now()
+    print(f"Simulated {SIMULATOR[0].simulator_time - SIMULATOR[0].genesis_time}s in {end-start}")
