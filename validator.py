@@ -192,7 +192,6 @@ class Validator:
         spec.state_transition(self.state, block)
         for attestation in block.message.body.attestations:
             self.attestation_cache.add_attestation(attestation, from_block=True)
-        print(f"Handled block {block.message.state_root}")
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -242,3 +241,28 @@ class Validator:
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
         return spec.ValidatorIndex(self.index), None, attestation
+
+
+def offload_handle_block(block: spec.SignedBeaconBlock, state: spec.BeaconState, store: spec.Store) \
+        -> Tuple[spec.BeaconState, spec.Store]:
+    spec.on_block(store, block)
+    spec.state_transition(state, block)
+    return state, store
+
+
+def offload_slot_state_transition(slot: NextSlotEvent,
+                                  attestations: Sequence[spec.Attestation],
+                                  state: spec.BeaconState,
+                                  store: spec.Store) \
+        -> Tuple[spec.BeaconState, spec.Store, Optional[spec.ValidatorIndex]]:
+    spec.on_tick(store, slot.time)
+    for attestation in attestations:
+        try:
+            spec.on_attestation(store, attestation)
+        except AssertionError:
+            print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
+    head_state = state.copy()
+    if head_state.slot < slot.slot:
+        spec.process_slots(head_state, slot.slot)
+    proposer_current_slot = spec.get_beacon_proposer_index(head_state)
+    return head_state, store, proposer_current_slot
