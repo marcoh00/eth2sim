@@ -256,19 +256,68 @@ def offload_handle_block(block: spec.SignedBeaconBlock, state: spec.BeaconState,
     return state, store
 
 
-def offload_slot_state_transition(slot: NextSlotEvent,
-                                  attestations: Sequence[spec.Attestation],
-                                  state: spec.BeaconState,
-                                  store: spec.Store) \
+def encode_offload_slot_arguments(validator: Validator, event: NextSlotEvent)\
+        -> Tuple[NextSlotEvent, Sequence[bytes], bytes, PickleableStore]:
+    return (
+        event,
+        tuple(
+            attestation[2].encode_bytes() for attestation in validator.attestation_cache.attestations(event.slot - 1)
+        ),
+        validator.state.encode_bytes(),
+        PickleableStore.from_store(validator.store)
+    )
+
+
+def decode_offload_slot_arguments(args: Tuple[NextSlotEvent, Sequence[bytes], bytes, PickleableStore])\
+        -> Tuple[NextSlotEvent, Sequence[spec.Attestation], spec.BeaconState, spec.Store]:
+    return (
+        args[0],
+        tuple(spec.Attestation.decode_bytes(b) for b in args[1]),
+        spec.BeaconState.decode_bytes(args[2]),
+        PickleableStore.into_store(args[3])
+    )
+
+
+def encode_offload_slot_results(head_state: spec.BeaconState,
+                                store: spec.Store,
+                                proposer_slot: Optional[spec.ValidatorIndex])\
+        -> Tuple[bytes, PickleableStore, Optional[bytes]]:
+    return (
+        head_state.encode_bytes(),
+        PickleableStore.from_store(store),
+        proposer_slot.encode_bytes() if proposer_slot is not None else None
+    )
+
+
+def decode_offload_slot_results(args: Tuple[bytes, PickleableStore, Optional[bytes]])\
         -> Tuple[spec.BeaconState, spec.Store, Optional[spec.ValidatorIndex]]:
-    spec.on_tick(store, slot.time)
+    return (
+        spec.BeaconState.decode_bytes(args[0]),
+        args[1].into_store(),
+        spec.ValidatorIndex.decode_bytes(args[2]) if args[2] is not None else None
+    )
+
+
+def apply_offload_slot_results_and_get_head_state(validator: Validator,
+                                                  args: Tuple[bytes, PickleableStore, Optional[bytes]])\
+        -> spec.BeaconState:
+    state, store, proposer_index = decode_offload_slot_results(args)
+    validator.store = store
+    validator.proposer_current_slot = proposer_index
+    return state
+
+
+def offload_slot_state_transition(args: Tuple[NextSlotEvent, Sequence[bytes], bytes, PickleableStore]) \
+        -> Tuple[bytes, PickleableStore, Optional[bytes]]:
+    event, attestations, state, store = decode_offload_slot_arguments(args)
+    spec.on_tick(store, event.time)
     for attestation in attestations:
         try:
             spec.on_attestation(store, attestation)
         except AssertionError:
             print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
     head_state = state.copy()
-    if head_state.slot < slot.slot:
-        spec.process_slots(head_state, slot.slot)
+    if head_state.slot < event.slot:
+        spec.process_slots(head_state, event.slot)
     proposer_current_slot = spec.get_beacon_proposer_index(head_state)
-    return head_state, store, proposer_current_slot
+    return encode_offload_slot_results(head_state, store, proposer_current_slot)
