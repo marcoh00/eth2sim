@@ -96,7 +96,6 @@ class Validator:
         spec.on_tick(self.store, message.time)
         if message.slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee()
-            print(f"{message.slot // spec.SLOTS_PER_EPOCH} -----------------------------------------------------------")
 
         # Keep one epoch of past attestations
         self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
@@ -173,7 +172,6 @@ class Validator:
         return spec.ValidatorIndex(self.index), None, signed_aggregate_and_proof
 
     def handle_attestation(self, attestation: spec.Attestation):
-        print(f'[Validator {self.index}] ATTESTATION (from {attestation.aggregation_bits})')
         previous_epoch = spec.get_previous_epoch(self.state)
         attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
         if attestation_epoch >= previous_epoch:
@@ -240,6 +238,7 @@ class Validator:
             signature=spec.get_attestation_signature(self.state, attestation_data, self.privkey)
         )
 
+        self.attestation_cache.add_attestation(attestation)
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
         return spec.ValidatorIndex(self.index), None, attestation
