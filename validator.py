@@ -7,7 +7,7 @@ from eth_typing import BLSPubkey
 import eth2spec.phase0.spec as spec
 from cache import AttestationCache
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE
-from helpers import popcnt
+from helpers import popcnt, PickleableStore
 
 
 class Validator:
@@ -90,29 +90,35 @@ class Validator:
         )
         return spec.ValidatorIndex(self.index), None, signed_block
 
-    def handle_next_slot_event(self, message: NextSlotEvent)\
+    def handle_next_slot_event(self, message: NextSlotEvent, head_state=None)\
             -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        self.current_slot = message.slot
-        spec.on_tick(self.store, message.time)
-        if message.slot % spec.SLOTS_PER_EPOCH == 0:
-            self.update_committee()
+        self.pre_slot_update(message)
+        if head_state is None:
+            head_state = self.internal_slot_state_transition(message)
+        return self.post_slot_state_update(message, head_state)
 
+    def pre_slot_update(self, event: NextSlotEvent):
+        self.current_slot = event.slot
         # Keep one epoch of past attestations
-        self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
+        self.attestation_cache.cleanup(event.slot, uint64(spec.SLOTS_PER_EPOCH))
 
-        # Handle last slot's attestations
-        for slot, committee, attestation in self.attestation_cache.attestations(message.slot - 1):
+    def internal_slot_state_transition(self, event: NextSlotEvent) -> spec.BeaconState:
+        spec.on_tick(self.store, event.time)
+        for attestation in self.attestation_cache.attestations(event.slot - 1):
             try:
-                spec.on_attestation(self.store, attestation)
+                spec.on_attestation(self.store, attestation[2])
             except AssertionError:
                 print(f"COULD FINALLY NOT VALIDATE ATTESTATION {attestation} !!!")
-                self.attestation_cache.remove_attestation(slot, committee, attestation)
-
-        # Advance state for checking
         head_state = self.state.copy()
-        if head_state.slot < message.slot:
-            spec.process_slots(head_state, message.slot)
+        if head_state.slot < event.slot:
+            spec.process_slots(head_state, event.slot)
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
+        return head_state
+
+    def post_slot_state_update(self, event: NextSlotEvent, head_state: spec.BeaconState)\
+            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
+        if event.slot % spec.SLOTS_PER_EPOCH == 0:
+            self.update_committee()
 
         # Propose block if needed
         if spec.ValidatorIndex(self.index) == self.proposer_current_slot:
