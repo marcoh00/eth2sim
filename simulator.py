@@ -20,7 +20,8 @@ from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, S
 from network import Network
 from pathvalidation import valid_writable_path
 from validator import Validator, encode_offload_slot_arguments, offload_slot_state_transition, \
-    decode_offload_slot_arguments, decode_offload_slot_results
+    decode_offload_slot_arguments, decode_offload_slot_results, encode_offload_block_arguments, \
+    offload_block_processing, decode_offload_block_results
 from importlib import reload
 
 
@@ -185,8 +186,44 @@ class Simulator:
     def handle_message_event(self, event: MessageEvent):
         self.validators[event.toidx].handle_message_event(event)
 
+    def handle_parallel_block_processing(self, cross_epoch_boundary_messages: Sequence[MessageEvent]):
+        if len(cross_epoch_boundary_messages) > 0:
+            validator_indices = tuple(message.toidx for message in cross_epoch_boundary_messages)
+            print(f'Block serialize ({len(cross_epoch_boundary_messages)})')
+            states = (encode_offload_block_arguments(message.message,
+                                                     self.validators[message.toidx].state,
+                                                     self.validators[message.toidx].store
+                                                     ) for message in cross_epoch_boundary_messages)
+            print('Block calc')
+            results = self.pool.map(offload_block_processing, states)
+            print('Block apply')
+            for message, encoded_result in zip(cross_epoch_boundary_messages, results):
+                state, store = decode_offload_block_results(encoded_result)
+                self.validators[message.toidx].state = state
+                self.validators[message.toidx].store = store
+                for attestation in message.message.message.body.attestations:
+                    self.validators[message.toidx].attestation_cache.add_attestation(attestation)
+
+    def handle_bulk_block_messages(self, bulk_block_messages: Sequence[MessageEvent]):
+        cross_epoch_boundary_messages = list()
+        same_epoch_messages = list()
+        for message in bulk_block_messages:
+            assert isinstance(message.message, spec.SignedBeaconBlock)
+            validator = self.validators[message.toidx]
+            validator_epoch = spec.get_current_epoch(validator.state)
+            block_epoch = spec.compute_epoch_at_slot(message.message.message.slot)
+            if block_epoch > validator_epoch:
+                cross_epoch_boundary_messages.append(message)
+            else:
+                same_epoch_messages.append(message)
+
+        for message in same_epoch_messages:
+            self.handle_message_event(message)
+        self.handle_parallel_block_processing(cross_epoch_boundary_messages)
+
     def start_simulation(self):
         last_time = uint64(0)
+        bulk_block_messages = list()
         actions = {
             NextSlotEvent: self.handle_next_slot_event,
             LatestVoteOpportunity: self.handle_latest_vote_opportunity,
@@ -201,11 +238,18 @@ class Simulator:
             if next_action.time > last_time:
                 print(f'At time: {next_action.time}')
                 last_time = next_action.time
+                self.handle_bulk_block_messages(bulk_block_messages)
+                bulk_block_messages = list()
 
             if isinstance(next_action, SimulationEndEvent):
                 break
             assert self.simulator_time <= next_action.time
             self.simulator_time = next_action.time
+
+            if isinstance(next_action, MessageEvent) and isinstance(next_action.message, spec.SignedBeaconBlock):
+                bulk_block_messages.append(next_action)
+                continue
+
             actions[type(next_action)](next_action)
 
     def __handle_validator_message_event(self,
@@ -243,7 +287,7 @@ def test():
     config_util.prepare_config(args.configpath, args.configname)
     # noinspection PyTypeChecker
     reload(spec)
-    simulator = Simulator(args.eth1blockhash, pool, args.configpath, args.configname)
+    simulator = Simulator(args.eth1blockhash, pool)
     spec.bls.bls_active = False
 
     print('Ethereum 2.0 Beacon Chain Simulator')
