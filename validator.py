@@ -1,3 +1,4 @@
+from importlib import reload
 from typing import Tuple, Sequence, Optional, List
 
 from remerkleable.basic import uint64
@@ -6,6 +7,7 @@ from eth_typing import BLSPubkey
 
 import eth2spec.phase0.spec as spec
 from cache import AttestationCache
+from eth2spec.config import config_util
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE
 from helpers import popcnt, PickleableStore
 
@@ -92,8 +94,8 @@ class Validator:
 
     def handle_next_slot_event(self, message: NextSlotEvent, head_state=None)\
             -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        self.pre_slot_update(message)
         if head_state is None:
+            self.pre_slot_update(message)
             head_state = self.internal_slot_state_transition(message)
         return self.post_slot_state_update(message, head_state)
 
@@ -248,6 +250,18 @@ class Validator:
         self.slot_last_attested = head_state.slot
         return spec.ValidatorIndex(self.index), None, attestation
 
+    @staticmethod
+    def test_encode_decode_state(state: spec.BeaconState) -> spec.BeaconState:
+        state = state.encode_bytes()
+        result = spec.BeaconState.decode_bytes(state)
+        return result
+
+    @staticmethod
+    def test_encode_decode_store(state: spec.Store) -> spec.Store:
+        state = PickleableStore.from_store(state)
+        result = state.into_store()
+        return result
+
 
 def offload_handle_block(block: spec.SignedBeaconBlock, state: spec.BeaconState, store: spec.Store) \
         -> Tuple[spec.BeaconState, spec.Store]:
@@ -321,3 +335,29 @@ def offload_slot_state_transition(args: Tuple[NextSlotEvent, Sequence[bytes], by
         spec.process_slots(head_state, event.slot)
     proposer_current_slot = spec.get_beacon_proposer_index(head_state)
     return encode_offload_slot_results(head_state, store, proposer_current_slot)
+
+
+def encode_offload_block_arguments(block: spec.SignedBeaconBlock, state: spec.BeaconState, store: spec.Store)\
+        -> Tuple[bytes, bytes, PickleableStore]:
+    return block.encode_bytes(), state.encode_bytes(), PickleableStore.from_store(store)
+
+
+def decode_offload_block_arguments(args: Tuple[bytes, bytes, PickleableStore])\
+        -> Tuple[spec.SignedBeaconBlock, spec.BeaconState, spec.Store]:
+    return (
+        spec.SignedBeaconBlock.decode_bytes(args[0]),
+        spec.BeaconState.decode_bytes(args[1]),
+        args[2].into_store()
+    )
+
+
+def decode_offload_block_results(args: Tuple[bytes, PickleableStore]) -> Tuple[spec.BeaconState, spec.Store]:
+    return spec.BeaconState.decode_bytes(args[0]), args[1].into_store()
+
+
+def offload_block_processing(args: Tuple[Sequence[bytes], Sequence[bytes], PickleableStore])\
+        -> Tuple[bytes, PickleableStore]:
+    block, state, store = decode_offload_block_arguments(args)
+    spec.on_block(store, block)
+    spec.state_transition(state, block)
+    return state.encode_bytes(), PickleableStore.from_store(store)

@@ -1,8 +1,10 @@
 import argparse
+import multiprocessing
 import queue
 import random
 import sys
 from datetime import datetime
+from multiprocessing.spawn import freeze_support
 from pathlib import Path
 from typing import Optional, List, Sequence
 from py_ecc.bls import G2ProofOfPossession as Bls
@@ -17,7 +19,8 @@ from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, S
     Event, MESSAGE_TYPE
 from network import Network
 from pathvalidation import valid_writable_path
-from validator import Validator
+from validator import Validator, encode_offload_slot_arguments, offload_slot_state_transition, \
+    decode_offload_slot_arguments, decode_offload_slot_results
 from importlib import reload
 
 
@@ -32,7 +35,7 @@ class Simulator:
     past_events: List[Event]
     random: ByteVector
 
-    def __init__(self, rand: ByteVector):
+    def __init__(self, rand: ByteVector, pool: multiprocessing.Pool):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
         self.slot = spec.Slot(0)
@@ -41,6 +44,7 @@ class Simulator:
         self.events = queue.PriorityQueue()
         self.past_events = list()
         self.random = rand
+        self.pool = pool
 
     def normalized_simulator_time(self):
         return self.simulator_time - self.genesis_time
@@ -131,18 +135,40 @@ class Simulator:
         print('[GENESIS] Alright')
 
     def handle_next_slot_event(self, event: NextSlotEvent):
+        is_epoch_boundary = False
         if event.slot % spec.SLOTS_PER_EPOCH == 0:
             print("---------- EPOCH BOUNDARY ----------")
+            is_epoch_boundary = True
+
         print(f"!!! SLOT {event.slot} !!!")
         self.slot += 1
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
-        for validator in self.validators:
-            optional_block = validator.handle_next_slot_event(event)
-            if optional_block is not None:
-                self.__handle_validator_message_event(*optional_block)
-                print(optional_block[2])
+
+        if not is_epoch_boundary:
+            for validator in self.validators:
+                optional_block = validator.handle_next_slot_event(event)
+                if optional_block is not None:
+                    self.__handle_validator_message_event(*optional_block)
+                    print(optional_block[2])
+        else:
+            print('Pre-slot update')
+            for validator in self.validators:
+                validator.pre_slot_update(event)
+            print('Serialize states...')
+            states = (encode_offload_slot_arguments(validator, event) for validator in self.validators)
+            print('Calc...')
+            new_states = self.pool.map(offload_slot_state_transition, states)
+            print('Got new states')
+            for validator, newstate in zip(self.validators, new_states):
+                head_state, store, proposer = decode_offload_slot_results(newstate)
+                validator.store = store
+                validator.proposer_current_slot = proposer
+                optional_block = validator.post_slot_state_update(event, head_state)
+                if optional_block is not None:
+                    self.__handle_validator_message_event(*optional_block)
+                    print(optional_block[2])
 
     def handle_latest_vote_opportunity(self, event: LatestVoteOpportunity):
         for validator in self.validators:
@@ -194,7 +220,12 @@ class Simulator:
                 self.network.send(fromidx, spec.ValidatorIndex(validator.index), message)
 
 
-SIMULATOR = [Simulator(random.randbytes(32)),]
+def multiprocessing_initializer(configpath: str, configname: str):
+    config_util.prepare_config(configpath, configname)
+    # noinspection PyTypeChecker
+    reload(spec)
+    spec.bls.bls_active = False
+
 
 def test():
     parser = argparse.ArgumentParser()
@@ -204,11 +235,15 @@ def test():
     # parser.add_argument('--state', type=valid_writable_path, required=False, default='./state')
     parser.add_argument('--eth1blockhash', type=bytes.fromhex, required=False, default=random.randbytes(32).hex())
     args = parser.parse_args()
+    print(f'Initialize Simulator with {multiprocessing.cpu_count()} helper processes')
+    pool = multiprocessing.Pool(multiprocessing.cpu_count(),
+                                initializer=multiprocessing_initializer,
+                                initargs=(args.configpath, args.configname)
+                                )
     config_util.prepare_config(args.configpath, args.configname)
     # noinspection PyTypeChecker
     reload(spec)
-    SIMULATOR[0] = Simulator(args.eth1blockhash)
-    simulator = SIMULATOR[0]
+    simulator = Simulator(args.eth1blockhash, pool, args.configpath, args.configname)
     spec.bls.bls_active = False
 
     print('Ethereum 2.0 Beacon Chain Simulator')
@@ -225,10 +260,11 @@ def test():
 
 
 if __name__ == '__main__':
+    freeze_support()
     start = datetime.now()
     try:
         test()
         end = datetime.now()
     except KeyboardInterrupt:
         end = datetime.now()
-    print(f"Simulated {SIMULATOR[0].simulator_time - SIMULATOR[0].genesis_time}s in {end-start}")
+    print(f"Simulated {end-start}")
