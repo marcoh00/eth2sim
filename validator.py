@@ -1,19 +1,32 @@
+from multiprocessing.connection import Connection
+from multiprocessing.context import Process
+from multiprocessing import Queue, JoinableQueue
+from pathlib import Path
+import random
+from time import sleep
 from typing import Tuple, Sequence, Optional, List
 
+from py_ecc.bls12_381 import curve_order
+from py_ecc.bls import G2ProofOfPossession as Bls
 from remerkleable.basic import uint64
 from remerkleable.bitfields import Bitlist
 from eth_typing import BLSPubkey
 
 import eth2spec.phase0.spec as spec
 from cache import AttestationCache
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE
+from eth2spec.test.helpers.deposits import build_deposit
+from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE, \
+    RequestDeposit, Event, SimulationEndEvent
 from helpers import popcnt
 
 
-class Validator:
-    index: uint64
+class Validator(Process):
+    index: spec.ValidatorIndex
+    counter: int
     privkey: int
     pubkey: BLSPubkey
+    recv_queue: JoinableQueue
+    send_queue: Queue
     state: spec.BeaconState
     store: spec.Store
 
@@ -22,21 +35,112 @@ class Validator:
     last_attestation_data: spec.AttestationData
 
     current_slot: spec.Slot
+    current_time: uint64
     proposer_current_slot: Optional[spec.ValidatorIndex]
 
     attestation_cache: AttestationCache
 
-    def __init__(self, index, privkey, pubkey):
-        self.index = index
-        self.privkey = privkey
-        self.pubkey = pubkey
+    should_quit: bool
 
-        self.state = spec.BeaconState()
-        self.committee = None
-        self.slot_last_attested = None
+    def __init__(self, counter: int, recv_queue: JoinableQueue, send_queue: Queue, keydir: Optional[str]):
+        super().__init__()
+        self.privkey, self.pubkey = self.__init_keys(counter, keydir)
+        self.counter = counter
+        self.recv_queue = recv_queue
+        self.send_queue = send_queue
         self.current_slot = spec.Slot(0)
+        self.current_time = uint64(0)
+        self.slot_last_attested = None
         self.attestation_cache = AttestationCache()
-        self.proposer_current_slot = None
+        self.should_quit = False
+        self.event_cache = None
+
+    def run(self):
+        while not self.should_quit:
+            item = self.recv_queue.get()
+            self.__handle_event(item)
+            self.recv_queue.task_done()
+
+    def __handle_event(self, event: Event):
+        if event.time < self.current_time:
+            self.send_queue.put(
+                SimulationEndEvent(time=self.current_time,
+                                   message=f"Own time {self.current_time} is later than event time {event.time}. {event}/{self.event_cache}")
+            )
+        self.event_cache = event
+        self.current_time = event.time
+        actions = {
+            MessageEvent: self.__handle_message_event,
+            SimulationEndEvent: self.__handle_simulation_end,
+            LatestVoteOpportunity: self.handle_latest_voting_opportunity,
+            AggregateOpportunity: self.handle_aggregate_opportunity,
+            NextSlotEvent: self.handle_next_slot_event
+        }
+        # noinspection PyArgumentList,PyTypeChecker
+        actions[type(event)](event)
+
+    def __handle_message_event(self, event: MessageEvent):
+        decoder = {
+            'Attestation': spec.Attestation,
+            'SignedAggregateAndProof': spec.SignedAggregateAndProof,
+            'SignedBeaconBlock': spec.SignedBeaconBlock,
+            'BeaconBlock': spec.BeaconBlock,
+            'BeaconState': spec.BeaconState
+        }
+        actions = {
+            'Attestation': self.handle_attestation,
+            'SignedAggregateAndProof': self.handle_aggregate,
+            'SignedBeaconBlock': self.handle_block,
+            'BeaconBlock': self.handle_genesis_block,
+            'BeaconState': self.handle_genesis_state
+        }
+        payload = decoder[event.message_type].decode_bytes(event.message)
+        # noinspection PyArgumentList
+        actions[event.message_type](payload)
+
+    def handle_genesis_state(self, state: spec.BeaconState):
+        self.state = state
+
+    def handle_genesis_block(self, block: spec.BeaconBlock):
+        self.index = max(
+            genesis_validator[0]
+            for genesis_validator in enumerate(self.state.validators)
+            if genesis_validator[1].pubkey == self.pubkey
+        )
+        self.store = spec.get_forkchoice_store(self.state, block)
+        self.update_committee()
+
+    def __handle_simulation_end(self, event: SimulationEndEvent):
+        print(self.index)
+        #print(self.state)
+        self.should_quit = True
+
+    @staticmethod
+    def __init_keys(counter: int, keydir: Optional[str]) -> Tuple[int, BLSPubkey]:
+        pubkey = None
+        privkey = None
+        pubkey_file = None
+        privkey_file = None
+        keys = None
+        if keydir is not None:
+            keys = Path(keydir)
+
+        if keys.is_dir():
+            pubkey_file = (keys / f'{counter}.pubkey')
+            privkey_file = (keys / f'{counter}.privkey')
+            if pubkey_file.is_file() and privkey_file.is_file():
+                print('Read keys from file')
+                pubkey = pubkey_file.read_bytes()
+                privkey = int(privkey_file.read_text())
+        if not privkey or not pubkey:
+            print('Generate and save keys')
+            privkey = random.randint(1, curve_order)
+            pubkey = Bls.SkToPk(privkey)
+            if keys is not None:
+                assert isinstance(pubkey_file, Path)
+                pubkey_file.write_bytes(pubkey)
+                privkey_file.write_text(str(privkey))
+        return privkey, pubkey
 
     def update_committee(self):
         self.committee = spec.get_committee_assignment(
@@ -45,8 +149,7 @@ class Validator:
             spec.ValidatorIndex(self.index)
         )
 
-    def propose_block(self, head_state: spec.BeaconState)\
-            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
+    def propose_block(self, head_state: spec.BeaconState):
         head = spec.get_head(self.store)
         candidate_attestations = tuple(
             self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
@@ -88,20 +191,35 @@ class Validator:
             message=block,
             signature=spec.get_block_signature(self.state, block, self.privkey)
         )
-        return spec.ValidatorIndex(self.index), None, signed_block
+        encoded_signed_block = signed_block.encode_bytes()
 
-    def handle_next_slot_event(self, message: NextSlotEvent)\
-            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        self.current_slot = message.slot
+        self.send_queue.put(MessageEvent(
+            time=self.current_time,
+            message=encoded_signed_block,
+            message_type='SignedBeaconBlock',
+            fromidx=self.index,
+            toidx=None
+        ))
+
+        """
+        self.send_queue.put(SimulationEndEvent(
+            time=self.current_time,
+            message=f"{self.index} proposes a block!!!"
+        ))
+        """
+
+    def handle_next_slot_event(self, message: NextSlotEvent):
+        self.current_slot = spec.Slot(message.slot)
+
         spec.on_tick(self.store, message.time)
         if message.slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee()
 
         # Keep one epoch of past attestations
-        self.attestation_cache.cleanup(message.slot, uint64(spec.SLOTS_PER_EPOCH))
+        self.attestation_cache.cleanup(spec.Slot(message.slot), spec.SLOTS_PER_EPOCH)
 
         # Handle last slot's attestations
-        for slot, committee, attestation in self.attestation_cache.attestations(message.slot - 1):
+        for slot, committee, attestation in self.attestation_cache.attestations(spec.Slot(message.slot) - 1):
             try:
                 spec.on_attestation(self.store, attestation)
             except AssertionError:
@@ -111,27 +229,22 @@ class Validator:
         # Advance state for checking
         head_state = self.state.copy()
         if head_state.slot < message.slot:
-            spec.process_slots(head_state, message.slot)
+            spec.process_slots(head_state, spec.Slot(message.slot))
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
 
         # Propose block if needed
         if spec.ValidatorIndex(self.index) == self.proposer_current_slot:
             print(f"[VALIDATOR {self.index}] I'M PROPOSER!!!")
             return self.propose_block(head_state)
-        return None
 
-    def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity)\
-            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        self.current_slot = message.slot
+    def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested is None:
-            return self.attest()
+            self.attest()
+            return
         if self.slot_last_attested < message.slot:
-            return self.attest()
-        return None
+            self.attest()
 
-    def handle_aggregate_opportunity(self, message: AggregateOpportunity)\
-            -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        self.current_slot = message.slot
+    def handle_aggregate_opportunity(self, message: AggregateOpportunity):
         if not self.slot_last_attested == message.slot:
             return
         slot_signature = spec.get_slot_signature(self.state, message.slot, self.privkey)
@@ -169,7 +282,14 @@ class Validator:
             message=aggregate_and_proof,
             signature=aggregate_and_proof_signature
         )
-        return spec.ValidatorIndex(self.index), None, signed_aggregate_and_proof
+        encoded_aggregate_and_proof = signed_aggregate_and_proof.encode_bytes()
+        self.send_queue.put(MessageEvent(
+            time=self.current_time,
+            message=encoded_aggregate_and_proof,
+            message_type='SignedAggregateAndProof',
+            fromidx=self.index,
+            toidx=None
+        ))
 
     def handle_attestation(self, attestation: spec.Attestation):
         previous_epoch = spec.get_previous_epoch(self.state)
@@ -192,22 +312,29 @@ class Validator:
         spec.state_transition(self.state, block)
         for attestation in block.message.body.attestations:
             self.attestation_cache.add_attestation(attestation, from_block=True)
-        print(f"Handled block {block.message.state_root}")
+        # print(f"Handled block {block.message.state_root}")
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
-            spec.Attestation: self.handle_attestation,
-            spec.SignedAggregateAndProof: self.handle_aggregate,
-            spec.SignedBeaconBlock: self.handle_block
+            'Attestation': self.handle_attestation,
+            'SignedAggregateAndProof': self.handle_aggregate,
+            'SignedBeaconBlock': self.handle_block
+        }
+        decoder = {
+            'Attestation': spec.Attestation.decode_bytes,
+            'SignedAggregateAndProof': spec.SignedAggregateAndProof.decode_bytes,
+            'SignedBeaconBlock': spec.SignedBeaconBlock.decode_bytes
         }
         # noinspection PyArgumentList
-        actions[type(message.message)](message.message)
+        payload = decoder[message.message_type](message.message)
+        # noinspection PyArgumentList
+        actions[message.message_type](payload)
 
-    def attest(self) -> Optional[Tuple[spec.ValidatorIndex, Optional[Sequence[spec.ValidatorIndex]], MESSAGE_TYPE]]:
-        if not self.committee:
+    def attest(self):
+        if self.committee is None:
             self.update_committee()
         if not (self.current_slot == self.committee[2] and self.index in self.committee[0]):
-            return None
+            return
         head_block = self.store.blocks[spec.get_head(self.store)]
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:
@@ -241,4 +368,13 @@ class Validator:
         self.attestation_cache.add_attestation(attestation)
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
-        return spec.ValidatorIndex(self.index), None, attestation
+
+        encoded_attestation = attestation.encode_bytes()
+        message = MessageEvent(
+            time=self.current_time,
+            message=encoded_attestation,
+            message_type='Attestation',
+            fromidx=self.index,
+            toidx=None
+        )
+        self.send_queue.put(message)

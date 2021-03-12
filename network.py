@@ -24,3 +24,6 @@ class Network(object):
     def send(self, fromidx: spec.ValidatorIndex, toidx: spec.ValidatorIndex, message: MESSAGE_TYPE):
         time = self.simulator.simulator_time + self.latency(fromidx, toidx)
         self.simulator.events.put(MessageEvent(time, message, fromidx, toidx))
+
+    def delay(self, message: MessageEvent):
+        message.time = message.time + self.latency(message.fromidx, message.toidx)

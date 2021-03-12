@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union
+from typing import Union, Optional
 
 from remerkleable.basic import uint64
 
@@ -25,26 +25,32 @@ class Event:
 
 @dataclass
 class NextSlotEvent(Event):
-    slot: spec.Slot
+    slot: int
 
 
 @dataclass
 class LatestVoteOpportunity(Event):
-    slot: spec.Slot
+    slot: int
 
 
 @dataclass
 class AggregateOpportunity(Event):
-    slot: spec.Slot
+    slot: int
 
 
 @dataclass
 class MessageEvent(Event):
-    message: MESSAGE_TYPE
-    fromidx: spec.ValidatorIndex
-    toidx: spec.ValidatorIndex
+    message: bytes
+    message_type: str
+    fromidx: int
+    toidx: Optional[int]
+
+
+@dataclass
+class RequestDeposit(Event):
+    stake: int
 
 
 @dataclass
 class SimulationEndEvent(Event):
-    pass
+    message: Optional[str] = None
