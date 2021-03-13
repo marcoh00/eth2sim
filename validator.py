@@ -1,3 +1,4 @@
+from importlib import reload
 from multiprocessing.connection import Connection
 from multiprocessing.context import Process
 from multiprocessing import Queue, JoinableQueue
@@ -14,10 +15,11 @@ from eth_typing import BLSPubkey
 
 import eth2spec.phase0.spec as spec
 from cache import AttestationCache
+from eth2spec.config import config_util
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE, \
     RequestDeposit, Event, SimulationEndEvent
-from helpers import popcnt
+from helpers import popcnt, queue_element_or_none
 
 
 class Validator(Process):
@@ -42,7 +44,13 @@ class Validator(Process):
 
     should_quit: bool
 
-    def __init__(self, counter: int, recv_queue: JoinableQueue, send_queue: Queue, keydir: Optional[str]):
+    def __init__(self,
+                 counter: int,
+                 recv_queue: JoinableQueue,
+                 send_queue: Queue,
+                 configpath: str,
+                 configname: str,
+                 keydir: Optional[str]):
         super().__init__()
         self.privkey, self.pubkey = self.__init_keys(counter, keydir)
         self.counter = counter
@@ -54,8 +62,13 @@ class Validator(Process):
         self.attestation_cache = AttestationCache()
         self.should_quit = False
         self.event_cache = None
+        self.specconf = (configpath, configname)
 
     def run(self):
+        config_util.prepare_config(self.specconf[0], self.specconf[1])
+        # noinspection PyTypeChecker
+        reload(spec)
+        spec.bls.bls_active = False
         while not self.should_quit:
             item = self.recv_queue.get()
             self.__handle_event(item)
@@ -112,7 +125,15 @@ class Validator(Process):
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
         print(self.index)
+        if self.index == 1:
+            # print(str(self.attestation_cache))
+            print(str(self.state))
         #print(self.state)
+        # Mark all remaining tasks as done
+        next_task = queue_element_or_none(self.recv_queue)
+        while next_task is not None:
+            self.recv_queue.task_done()
+            next_task = queue_element_or_none(self.recv_queue)
         self.should_quit = True
 
     @staticmethod

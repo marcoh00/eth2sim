@@ -58,11 +58,11 @@ class Simulator:
     def normalized_simulator_time(self):
         return self.simulator_time - self.genesis_time
 
-    def add_validator(self, keys: Optional[str]):
+    def add_validator(self, configpath: str, configname: str, keys: Optional[str]):
         print(f'[CREATE] Validator {len(self.validators)}')
         validator_queue = JoinableQueue()
         self.validators.append(
-            IndexedValidator(validator_queue, Validator(len(self.validators), validator_queue, self.queue, keys))
+            IndexedValidator(validator_queue, Validator(len(self.validators), validator_queue, self.queue, configpath, configname, keys))
         )
 
     def next_slot_event(self):
@@ -265,9 +265,9 @@ def test():
     print(f'Cryptographic Keys: {args.cryptokeys}')
 
     for i in range(64):
-        simulator.add_validator(args.cryptokeys)
+        simulator.add_validator(args.configpath, args.configname, args.cryptokeys)
     simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(500)))
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(300)))
     simulator.start_simulation()
 
 

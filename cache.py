@@ -101,3 +101,6 @@ class AttestationCache:
                     if keep_current_attestation:
                         keep.append(attestation)
                 committee_attestation_map[committee] = keep
+
+    def __str__(self):
+        print(str(self.attestation_cache))
