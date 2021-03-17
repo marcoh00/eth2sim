@@ -60,9 +60,12 @@ class Simulator:
 
     def add_validator(self, configpath: str, configname: str, keys: Optional[str]):
         print(f'[CREATE] Validator {len(self.validators)}')
+        debug = False
+        if len(self.validators) % 1 == 0:
+            debug = True
         validator_queue = JoinableQueue()
         self.validators.append(
-            IndexedValidator(validator_queue, Validator(len(self.validators), validator_queue, self.queue, configpath, configname, keys))
+            IndexedValidator(validator_queue, Validator(len(self.validators), validator_queue, self.queue, configpath, configname, keys, debug))
         )
 
     def next_slot_event(self):
@@ -89,6 +92,8 @@ class Simulator:
     def generate_genesis(self, eth1_blockhash):
         deposit_data = []
         deposits = []
+
+        print('Generate Genesis state')
         for validator in self.validators:
             deposit, root, deposit_data = build_deposit(
                 spec=spec,
@@ -109,7 +114,10 @@ class Simulator:
         encoded_state = genesis_state.encode_bytes()
         encoded_block = genesis_block.encode_bytes()
 
+        print('Start Validator processes')
+        color_step = min((0xFFFFFF - 0x7F7F7F) // len(self.validators), 0x27F)
         for validator in self.validators:
+            validator.validator.colorstep = color_step
             validator.validator.start()
             validator.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
@@ -143,6 +151,12 @@ class Simulator:
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
+        self.__distribute_event(event)
+
+    def __distribute_end_event(self, event: SimulationEndEvent):
+        if event.message:
+            print(f'---------- !!!!! {event.message} !!!!! ----------')
+        self.should_quit = True
         self.__distribute_event(event)
 
     def __distribute_event(self, event: Event, receiver: Optional[int] = None):
@@ -188,7 +202,7 @@ class Simulator:
             LatestVoteOpportunity: self.__distribute_event,
             AggregateOpportunity: self.__distribute_event,
             MessageEvent: self.__distribute_message_event,
-            SimulationEndEvent: self.__distribute_event
+            SimulationEndEvent: self.__distribute_end_event
         }
         recv_actions = {
             MessageEvent: self.__recv_message_event,
@@ -211,20 +225,23 @@ class Simulator:
                 while recv_event is not None:
                     # noinspection PyArgumentList
                     recv_actions[type(recv_event)](recv_event)
+                    print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
+                    if recv_event.time < self.simulator_time:
+                        print(f'[WARNING] Shall distribute event for the past! {recv_event}')
                     recv_event = queue_element_or_none(self.queue)
                 current_time_events = tuple(self.__collect_events_upto_current_time())
 
-            # Take while time=last_time
-            # Distribute to all
-            # Wait until finished
-            # Collect results
-            # Process results
         print('Hello World!')
 
     def __collect_events_upto_current_time(self, progress_time=False) -> Iterable[Event]:
         element = queue_element_or_none(self.events)
         while element is not None:
-            if element.time <= self.simulator_time:
+            if element.time == self.simulator_time:
+                yield element
+            elif element.time < self.simulator_time:
+                print(f'[WARNING] element.time is before simulator_time! {str(element)}')
+                # TODO FIX THIS!!!
+                element.time = self.simulator_time
                 yield element
             else:
                 self.events.put(element)
@@ -267,7 +284,7 @@ def test():
     for i in range(64):
         simulator.add_validator(args.configpath, args.configname, args.cryptokeys)
     simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64(300)))
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((6 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
     simulator.start_simulation()
 
 
