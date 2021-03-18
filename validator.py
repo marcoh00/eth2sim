@@ -1,4 +1,6 @@
 import json
+import sys
+import traceback
 from datetime import datetime
 from importlib import reload
 from multiprocessing.connection import Connection
@@ -82,13 +84,11 @@ class Validator(Process):
             return
         if not self.debugfile:
             self.debugfile = open(f'log_{self.index}_{int(time())}.json', 'w')
-            self.debugfile.write('[')
-            json.dump({'type': 'begin',
+            json.dump({'level': 'begin',
                        'index': self.index,
-                       'time': self.current_time,
+                       'timestamp': self.current_time,
                        'slot': self.current_slot,
-                       'payload': f'My color is {self.mycolor}'}, self.debugfile)
-        self.debugfile.write(',')
+                       'message': f'My color is {self.mycolor}'}, self.debugfile)
         logobj = ''
         if isinstance(obj, Container):
             logobj = str(obj)
@@ -96,12 +96,15 @@ class Validator(Process):
             logobj = dict()
             for key, value in obj.items():
                 logobj[key] = str(value)
+        else:
+            logobj = str(obj)
         json.dump(
-            {'type': typ,
+            {'level': typ,
              'index': self.index,
-             'time': self.current_time,
+             'timestamp': self.current_time,
              'slot': self.current_slot,
-             'payload': logobj}, self.debugfile)
+             'message': logobj}, self.debugfile)
+        self.debugfile.write('\n')
         if 'Error' in typ:
             self.debugfile.flush()
 
@@ -123,7 +126,6 @@ class Validator(Process):
             self.recv_queue.task_done()
         if self.debug:
             print(f'{self.index} Write Log file')
-            self.debugfile.write('}')
             self.debugfile.close()
 
     def __handle_event(self, event: Event):
@@ -257,8 +259,17 @@ class Validator(Process):
             voluntary_exits=voluntary_exits
         )
         block.body = body
-        self.__graph()
-        new_state_root = spec.compute_new_state_root(self.store.block_states[head], block)
+        self.__graph(show=True)
+        try:
+            new_state_root = spec.compute_new_state_root(self.store.block_states[head], block)
+        except AssertionError as e:
+            _, _, tb = sys.exc_info()
+            traceback.print_tb(tb) # Fixed format
+            tb_info = traceback.extract_tb(tb)
+            filename, line, func, text = tb_info[-1]
+            self.__debug(text, 'FindNewStateRootError')
+            self.send_queue.put(SimulationEndEvent(time=self.current_time))
+            return
         block.state_root = new_state_root
         signed_block = spec.SignedBeaconBlock(
             message=block,
@@ -290,7 +301,7 @@ class Validator(Process):
             self.update_committee()
 
         # Keep two epochs of past attestations
-        self.attestation_cache.cleanup(spec.Slot(message.slot), 2 * spec.SLOTS_PER_EPOCH)
+        self.attestation_cache.cleanup(spec.Slot(message.slot), spec.SLOTS_PER_EPOCH)
 
         # Handle last slot's attestations
         for slot, committee, attestation in self.attestation_cache.attestations(spec.Slot(message.slot) - 1):
@@ -385,7 +396,7 @@ class Validator(Process):
                     # Only validate attestations for known blocks. Try again later otherwise.
                     spec.on_attestation(self.store, attestation)
             except KeyError as e:
-                print(f'Unknown ancestor {e}')
+                print(f'[{self.index}] Unknown ancestor {e}')
                 self.__debug(spec.get_indexed_attestation(self.state, attestation), 'AttestationBlockLookupError')
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
@@ -405,9 +416,14 @@ class Validator(Process):
                     self.attestation_cache.add_attestation(attestation, from_block=True)
                 success.add(block)
             except AssertionError:
-                print(f'[VALIDATOR {self.index}] Could not validate block {str(block.message)}!')
+                _, _, tb = sys.exc_info()
+                traceback.print_tb(tb) # Fixed format
+                tb_info = traceback.extract_tb(tb)
+                filename, line, func, text = tb_info[-1]
+                print(f'[VALIDATOR {self.index}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
         for sblock in success:
             self.block_cache.remove(sblock)
+        self.__debug(str(self.block_cache), 'BlockCacheSize')
             # print(f"Handled block {block.message.state_root}")
 
     def handle_message_event(self, message: MessageEvent):
@@ -431,8 +447,9 @@ class Validator(Process):
             self.update_committee()
         if not (self.current_slot == self.committee[2] and self.index in self.committee[0]):
             return
-        head_block = self.store.blocks[spec.get_head(self.store)]
-        head_state = self.state.copy()
+        head_root = spec.get_head(self.store)
+        head_block = self.store.blocks[head_root]
+        head_state = self.store.block_states[head_root]
         if head_state.slot < self.current_slot:
             spec.process_slots(head_state, self.current_slot)
 
@@ -478,19 +495,16 @@ class Validator(Process):
         target = attestation.data.target
         target_slot = spec.compute_start_slot_at_epoch(target.epoch)
         if self.current_slot >= 8 and not target.root == spec.get_ancestor(self.store, attestation.data.beacon_block_root, target_slot):
+            self.__graph(show=True)
             print(f'[{self.index}] Sorry for invalid attestation!')
-            self.__debug(
-                str(
-                    {
+            self.__debug({
                         'attestation': str(attestation),
                         'state': str(self.state),
                         'head': str(spec.get_head(self.store))
-                    }
-                ), 'ProducedInvalidAttestationError'
-            )
+                    }, 'ProducedInvalidAttestationError')
 
 
-    def __graph(self):
+    def __graph(self, show=True):
         g = Digraph('G', filename=f'graph_{self.index}_{int(time())}.gv')
         blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
         for root, block in self.store.blocks.items():
@@ -533,11 +547,16 @@ class Validator(Process):
                                 #print(f'{root} at {block.slot} is finalized')
                             #print(f'{str(root)} at {str(slot)}={str(block.slot)} by {str(block.proposer_index)}')
                             s.node(str(root), shape=shape, color=color, style='filled')
-                            g.edge(str(root), str(block.parent_root))
+        for epoch in blocks_by_slot_and_epoch.keys():
+            for slot in blocks_by_slot_and_epoch[epoch].keys():
+                for root, block in blocks_by_slot_and_epoch[epoch][slot]:
+                    g.edge(str(root), str(block.parent_root))
         for validator, message in self.store.latest_messages.items():
             color = self.__color(validator)
             g.node(str(validator), shape='circle', color=color, style='filled')
             g.edge(str(validator), str(message.root))
         # print(blocks_by_slot_and_epoch)
 
-        g.view()
+        g.save()
+        if show:
+            g.view()

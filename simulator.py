@@ -219,16 +219,19 @@ class Simulator:
                 for event in current_time_events:
                     # noinspection PyTypeChecker
                     send_actions[type(event)](event)
-                for validator in self.validators:
-                    validator.queue.join()
-                recv_event = queue_element_or_none(self.queue)
-                while recv_event is not None:
-                    # noinspection PyArgumentList
-                    recv_actions[type(recv_event)](recv_event)
-                    print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
-                    if recv_event.time < self.simulator_time:
-                        print(f'[WARNING] Shall distribute event for the past! {recv_event}')
+                print('WAIT FOR VALIDATORS TO FINISH TASKS')
+                if not self.should_quit:
+                    for validator in self.validators:
+                        validator.queue.join()
+                        print(f"{validator.validator.counter} IS FINISHED")
                     recv_event = queue_element_or_none(self.queue)
+                    while recv_event is not None:
+                        # noinspection PyArgumentList
+                        recv_actions[type(recv_event)](recv_event)
+                        print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
+                        if recv_event.time < self.simulator_time:
+                            print(f'[WARNING] Shall distribute event for the past! {recv_event}')
+                        recv_event = queue_element_or_none(self.queue)
                 current_time_events = tuple(self.__collect_events_upto_current_time())
 
         print('Hello World!')
