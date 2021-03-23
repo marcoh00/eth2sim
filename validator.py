@@ -1,9 +1,7 @@
 import json
 import sys
 import traceback
-from datetime import datetime
 from importlib import reload
-from multiprocessing.connection import Connection
 from multiprocessing.context import Process
 from multiprocessing import Queue, JoinableQueue
 from pathlib import Path
@@ -11,7 +9,6 @@ import random
 from time import sleep, time
 from typing import Tuple, Sequence, Optional, List, Dict, Set
 
-import graphviz
 from graphviz import Graph, Digraph
 from py_ecc.bls12_381 import curve_order
 from py_ecc.bls import G2ProofOfPossession as Bls
@@ -21,16 +18,15 @@ from eth_typing import BLSPubkey
 from remerkleable.complex import Container
 
 import eth2spec.phase0.spec as spec
-from cache import AttestationCache
+from cache import AttestationCache, BlockCache
 from eth2spec.config import config_util
-from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, MESSAGE_TYPE, \
     RequestDeposit, Event, SimulationEndEvent
 from helpers import popcnt, queue_element_or_none
 
 
 class Validator(Process):
-    index: spec.ValidatorIndex
+    index: Optional[spec.ValidatorIndex]
     counter: int
     privkey: int
     pubkey: BLSPubkey
@@ -48,7 +44,7 @@ class Validator(Process):
     proposer_current_slot: Optional[spec.ValidatorIndex]
 
     attestation_cache: AttestationCache
-    block_cache: Set[spec.SignedBeaconBlock]
+    block_cache: BlockCache
 
     should_quit: bool
 
@@ -169,13 +165,20 @@ class Validator(Process):
         self.state = state
 
     def handle_genesis_block(self, block: spec.BeaconBlock):
-        self.index = max(
+        self.index = spec.ValidatorIndex(max(
             genesis_validator[0]
             for genesis_validator in enumerate(self.state.validators)
             if genesis_validator[1].pubkey == self.pubkey
-        )
+        ))
         self.store = spec.get_forkchoice_store(self.state, block)
+        self.block_cache = BlockCache(block)
         self.update_committee()
+        self.genesis_hash = spec.hash_tree_root(block)
+        self.__debug({
+            "BlockHash": self.genesis_hash,
+            "BlockSlot": block.slot,
+            "StateSlot": self.state.slot,
+            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfo")
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
         self.__debug(event, 'SimulationEnd')
@@ -294,6 +297,10 @@ class Validator(Process):
         """
 
     def handle_next_slot_event(self, message: NextSlotEvent):
+        self.__debug({
+            "BlockHash": self.genesis_hash,
+            "StateSlot": self.state.slot,
+            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnSlot")
         self.current_slot = spec.Slot(message.slot)
 
         spec.on_tick(self.store, message.time)
@@ -332,13 +339,13 @@ class Validator(Process):
     def handle_aggregate_opportunity(self, message: AggregateOpportunity):
         if not self.slot_last_attested == message.slot:
             return
-        slot_signature = spec.get_slot_signature(self.state, message.slot, self.privkey)
-        if not spec.is_aggregator(self.state, message.slot, self.committee[1], slot_signature):
+        slot_signature = spec.get_slot_signature(self.state, spec.Slot(message.slot), self.privkey)
+        if not spec.is_aggregator(self.state, spec.Slot(message.slot), self.committee[1], slot_signature):
             return
         attestations_to_aggregate = [
             attestation
             for attestation
-            in self.attestation_cache.attestation_cache[message.slot][self.committee[1]]
+            in self.attestation_cache.attestation_cache[spec.Slot(message.slot)][self.committee[1]]
             if attestation.data == self.last_attestation_data and popcnt(attestation.aggregation_bits) == 1
         ]
         aggregation_bits = list(0 for _ in range(len(self.committee[0])))
@@ -376,6 +383,10 @@ class Validator(Process):
         self.__debug(signed_aggregate_and_proof, 'AggregateAndProofSend')
 
     def handle_attestation(self, attestation: spec.Attestation):
+        self.__debug({
+            "BlockHash": self.genesis_hash,
+            "StateSlot": self.state.slot,
+            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnAttestation")
         self.__debug(attestation, 'AttestationRecv')
         previous_epoch = spec.get_previous_epoch(self.state)
         attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
@@ -404,27 +415,39 @@ class Validator(Process):
         self.handle_attestation(aggregate.message.aggregate)
 
     def handle_block(self, block: spec.SignedBeaconBlock):
+        self.__debug({
+            "BlockHash": self.genesis_hash,
+            "StateSlot": self.state.slot,
+            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnBlockError")
+        # Try to process an old chains first
+        old_chain = self.block_cache.longest_outstanding_chain(self.store)
+        if len(old_chain) > 0:
+            self.__debug(len(old_chain), 'OrphanedBlocksToHandle')
+        for cblock in old_chain:
+            spec.on_block(self.store, cblock)
+            self.block_cache.accept_block(cblock)
+
+        # Process the new block now
         self.__debug(block, 'BlockRecv')
-        self.block_cache.add(block)
-        success = set()
-        for block in self.block_cache:
+        self.block_cache.add_block(block)
+        chain = self.block_cache.chain_for_block(block, self.store)
+        self.__debug(str(len(chain)), 'BlocksToHandle')
+        for cblock in chain:
             try:
-                spec.on_block(self.store, block)
-                # spec.state_transition(self.state, block)
-                self.state = self.store.block_states[spec.hash_tree_root(block.message)]
+                spec.on_block(self.store, cblock)
+                self.block_cache.accept_block(cblock)
                 for attestation in block.message.body.attestations:
                     self.attestation_cache.add_attestation(attestation, from_block=True)
-                success.add(block)
             except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb) # Fixed format
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
                 print(f'[VALIDATOR {self.index}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
-        for sblock in success:
-            self.block_cache.remove(sblock)
-        self.__debug(str(self.block_cache), 'BlockCacheSize')
-            # print(f"Handled block {block.message.state_root}")
+        # Update head state
+        self.head_root = spec.get_head(self.store)
+        self.state = self.store.block_states[self.head_root]
+
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -449,7 +472,7 @@ class Validator(Process):
             return
         head_root = spec.get_head(self.store)
         head_block = self.store.blocks[head_root]
-        head_state = self.store.block_states[head_root]
+        head_state = self.store.block_states[head_root].copy()
         if head_state.slot < self.current_slot:
             spec.process_slots(head_state, self.current_slot)
 
