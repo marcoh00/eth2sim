@@ -34,6 +34,7 @@ class Validator(Process):
     send_queue: Queue
     state: spec.BeaconState
     store: spec.Store
+    head_root: spec.Root
 
     committee: Optional[Tuple[Sequence[spec.ValidatorIndex], spec.CommitteeIndex, spec.Slot]]
     slot_last_attested: Optional[spec.Slot]
@@ -65,7 +66,6 @@ class Validator(Process):
         self.current_time = uint64(0)
         self.slot_last_attested = None
         self.attestation_cache = AttestationCache()
-        self.block_cache = set()
         self.should_quit = False
         self.event_cache = None
         self.specconf = (configpath, configname)
@@ -172,13 +172,8 @@ class Validator(Process):
         ))
         self.store = spec.get_forkchoice_store(self.state, block)
         self.block_cache = BlockCache(block)
+        self.head_root = spec.hash_tree_root(block)
         self.update_committee()
-        self.genesis_hash = spec.hash_tree_root(block)
-        self.__debug({
-            "BlockHash": self.genesis_hash,
-            "BlockSlot": block.slot,
-            "StateSlot": self.state.slot,
-            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfo")
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
         self.__debug(event, 'SimulationEnd')
@@ -227,14 +222,22 @@ class Validator(Process):
         )
 
     def propose_block(self, head_state: spec.BeaconState):
-        head = spec.get_head(self.store)
+        # If the attestation's target epoch is the current epoch,
+        # the source checkpoint must match with the proposer's
+        #
+        # ep(target) == ep(now) => cp_justified == cp_source
+        # <=> ep(target) != ep(now) v cp_justified == cp_source
         candidate_attestations = tuple(
-            self.attestation_cache.all_attestations_with_unseen_validators(spec.get_current_slot(self.store) - 1)
+            attestation
+            for attestation in self.attestation_cache.all_attestations_with_unseen_validators(
+                spec.get_current_slot(self.store) - 1)
+            if attestation.data.target.epoch != spec.get_current_epoch(self.state)
+            or self.state.current_justified_checkpoint == attestation.data.source
         )
         block = spec.BeaconBlock(
             slot=head_state.slot,
             proposer_index=spec.ValidatorIndex(self.index),
-            parent_root=head,
+            parent_root=self.head_root,
             state_root=spec.Bytes32(bytes(0 for _ in range(0, 32)))
         )
         randao_reveal = spec.get_epoch_signature(head_state, block, self.privkey)
@@ -262,9 +265,8 @@ class Validator(Process):
             voluntary_exits=voluntary_exits
         )
         block.body = body
-        self.__graph(show=True)
         try:
-            new_state_root = spec.compute_new_state_root(self.store.block_states[head], block)
+            new_state_root = spec.compute_new_state_root(self.state, block)
         except AssertionError as e:
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb) # Fixed format
@@ -287,20 +289,10 @@ class Validator(Process):
             fromidx=self.index,
             toidx=None
         ))
-        self.__debug(signed_block, 'blockpropose')
-
-        """
-        self.send_queue.put(SimulationEndEvent(
-            time=self.current_time,
-            message=f"{self.index} proposes a block!!!"
-        ))
-        """
+        self.__graph(show=False)
+        self.__debug(signed_block, 'ProposeBlock')
 
     def handle_next_slot_event(self, message: NextSlotEvent):
-        self.__debug({
-            "BlockHash": self.genesis_hash,
-            "StateSlot": self.state.slot,
-            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnSlot")
         self.current_slot = spec.Slot(message.slot)
 
         spec.on_tick(self.store, message.time)
@@ -313,12 +305,14 @@ class Validator(Process):
         # Handle last slot's attestations
         for slot, committee, attestation in self.attestation_cache.attestations(spec.Slot(message.slot) - 1):
             try:
-                spec.on_attestation(self.store, attestation)
+                if attestation.data.beacon_block_root in self.store.blocks:
+                    spec.on_attestation(self.store, attestation)
             except AssertionError:
-                pass
-                # print(f'[VALIDATOR {self.index}] Could not validate attestation {str(attestation)}')
+                print(f'[VALIDATOR {self.index}] Could not validate attestation')
+                self.__debug(attestation, 'ValidateAttestationOnSlotBoundaryError')
 
         # Advance state for checking
+        self.__compute_head()
         head_state = self.state.copy()
         if head_state.slot < message.slot:
             spec.process_slots(head_state, spec.Slot(message.slot))
@@ -383,10 +377,6 @@ class Validator(Process):
         self.__debug(signed_aggregate_and_proof, 'AggregateAndProofSend')
 
     def handle_attestation(self, attestation: spec.Attestation):
-        self.__debug({
-            "BlockHash": self.genesis_hash,
-            "StateSlot": self.state.slot,
-            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnAttestation")
         self.__debug(attestation, 'AttestationRecv')
         previous_epoch = spec.get_previous_epoch(self.state)
         attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
@@ -394,31 +384,31 @@ class Validator(Process):
             self.attestation_cache.add_attestation(attestation)
         else:
             print(f"[WARNING] Validator {self.index} received Attestation for the past")
+            self.__debug(attestation_epoch, "AttestationPastEpochWarning")
         if spec.get_current_slot(self.store) > attestation.data.slot:
             # Only validate attestations for previous epochs
             # Attestations for the current epoch are validated on slot boundaries
-            target = attestation.data.target
-            target_slot = spec.compute_start_slot_at_epoch(target.epoch)
             try:
-                if self.current_slot >= 8 and not target.root == spec.get_ancestor(self.store, attestation.data.beacon_block_root, target_slot):
-                    print(f'Theres something wrong {attestation}')
-                    self.__debug(spec.get_indexed_attestation(self.state, attestation), 'AttestationAncestorError')
                 if attestation.data.beacon_block_root in self.store.blocks:
                     # Only validate attestations for known blocks. Try again later otherwise.
                     spec.on_attestation(self.store, attestation)
-            except KeyError as e:
-                print(f'[{self.index}] Unknown ancestor {e}')
-                self.__debug(spec.get_indexed_attestation(self.state, attestation), 'AttestationBlockLookupError')
+                else:
+                    # print(f"[VALIDATOR {self.index}] Received Attestation for unknown block {attestation.data.beacon_block_root}")
+                    self.__debug(spec.get_indexed_attestation(self.state, attestation), 'AttestationBlockLookupError')
+            except AssertionError as e:
+                _, _, tb = sys.exc_info()
+                traceback.print_tb(tb)
+                tb_info = traceback.extract_tb(tb)
+                filename, line, func, text = tb_info[-1]
+                print(f'[VALIDATOR {self.index}] Could not check attestation (assert line {line}, stmt {text})! {str(attestation.data)}!')
+                self.__debug(spec.get_indexed_attestation(self.state, attestation), 'UnexpectedAttestationAssertionError')
+
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
         # TODO check signature
         self.handle_attestation(aggregate.message.aggregate)
 
     def handle_block(self, block: spec.SignedBeaconBlock):
-        self.__debug({
-            "BlockHash": self.genesis_hash,
-            "StateSlot": self.state.slot,
-            "ForkChoiceStateForBlock": self.store.block_states[self.genesis_hash]}, "GenesisStateInfoOnBlockError")
         # Try to process an old chains first
         old_chain = self.block_cache.longest_outstanding_chain(self.store)
         if len(old_chain) > 0:
@@ -428,9 +418,17 @@ class Validator(Process):
             self.block_cache.accept_block(cblock)
 
         # Process the new block now
-        self.__debug(block, 'BlockRecv')
+        self.__debug({
+            'root': spec.hash_tree_root(block),
+            'parent': block.message.parent_root,
+            'proposer': block.message.proposer_index
+        }, 'BlockRecv')
         self.block_cache.add_block(block)
-        chain = self.block_cache.chain_for_block(block, self.store)
+        try:
+            chain = self.block_cache.chain_for_block(block, self.store)
+        except KeyError as e:
+            print(f'[VALIDATOR {self.index}] Could not validate block: {e}')
+            chain = []
         self.__debug(str(len(chain)), 'BlocksToHandle')
         for cblock in chain:
             try:
@@ -440,14 +438,10 @@ class Validator(Process):
                     self.attestation_cache.add_attestation(attestation, from_block=True)
             except AssertionError:
                 _, _, tb = sys.exc_info()
-                traceback.print_tb(tb) # Fixed format
+                traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
                 print(f'[VALIDATOR {self.index}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
-        # Update head state
-        self.head_root = spec.get_head(self.store)
-        self.state = self.store.block_states[self.head_root]
-
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -470,9 +464,9 @@ class Validator(Process):
             self.update_committee()
         if not (self.current_slot == self.committee[2] and self.index in self.committee[0]):
             return
-        head_root = spec.get_head(self.store)
-        head_block = self.store.blocks[head_root]
-        head_state = self.store.block_states[head_root].copy()
+        self.__compute_head()
+        head_block = self.store.blocks[self.head_root]
+        head_state = self.state.copy()
         if head_state.slot < self.current_slot:
             spec.process_slots(head_state, self.current_slot)
 
@@ -517,18 +511,14 @@ class Validator(Process):
         self.__debug(attestation, 'AttestationSend')
         target = attestation.data.target
         target_slot = spec.compute_start_slot_at_epoch(target.epoch)
-        if self.current_slot >= 8 and not target.root == spec.get_ancestor(self.store, attestation.data.beacon_block_root, target_slot):
-            self.__graph(show=True)
-            print(f'[{self.index}] Sorry for invalid attestation!')
-            self.__debug({
-                        'attestation': str(attestation),
-                        'state': str(self.state),
-                        'head': str(spec.get_head(self.store))
-                    }, 'ProducedInvalidAttestationError')
+
+    def __compute_head(self):
+        self.head_root = spec.get_head(self.store)
+        self.state = self.store.block_states[self.head_root]
 
 
     def __graph(self, show=True):
-        g = Digraph('G', filename=f'graph_{self.index}_{int(time())}.gv')
+        g = Digraph('G', filename=f'graph_{int(time())}_{self.index}.gv')
         blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
         for root, block in self.store.blocks.items():
             epoch = spec.compute_epoch_at_slot(block.slot)
@@ -541,18 +531,21 @@ class Validator(Process):
 
         justified_epoch, justified_root = self.store.justified_checkpoint.epoch, self.store.justified_checkpoint.root
         finalized_epoch, finalized_root = self.store.finalized_checkpoint.epoch, self.store.finalized_checkpoint.root
-        head_root = spec.get_head(self.store)
+        head_root = self.head_root
         for epoch in blocks_by_slot_and_epoch.keys():
             with g.subgraph(name=f'cluster_epoch_{int(epoch)}') as e:
                 e.attr(label=f'Epoch {int(epoch)}')
-                epoch_style = 'invisible'
+                epoch_style = 'solid'
+                epoch_color = 'grey'
                 if epoch <= justified_epoch:
                     epoch_style = 'solid'
+                    epoch_color = 'black'
                     #print(f'Epoch {epoch} is justified (latest justified is {str(self.store.justified_checkpoint)}')
                 if epoch <= finalized_epoch:
                     epoch_style = 'bold'
+                    epoch_color = 'black'
                     #print(f'Epoch {epoch} is finalized (latest finalized is {str(self.store.finalized_checkpoint)}')
-                e.attr(style=epoch_style)
+                e.attr(color=epoch_color, style=epoch_style)
                 for slot in blocks_by_slot_and_epoch[epoch].keys():
                     with e.subgraph(name=f'cluster_slot_{int(slot)}') as s:
                         s.attr(label=f'Slot {int(slot)}', style='dashed')

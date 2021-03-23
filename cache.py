@@ -139,10 +139,7 @@ class BlockCache:
     def chain_for_block(self, block: spec.SignedBeaconBlock, store: spec.Store) -> Sequence[spec.SignedBeaconBlock]:
         root = spec.hash_tree_root(block.message)
         chain = []
-        try:
-            self.__chain_for_block(block, root, chain, store)
-        except KeyError as e:
-            print(f"WARNING: {e}")
+        self.__chain_for_block(block, root, chain, store)
         return chain
 
     def __chain_for_block(self, block: spec.SignedBeaconBlock, root: spec.Root, chain: List[spec.SignedBeaconBlock], store: spec.Store):

@@ -219,22 +219,20 @@ class Simulator:
                 for event in current_time_events:
                     # noinspection PyTypeChecker
                     send_actions[type(event)](event)
-                print('WAIT FOR VALIDATORS TO FINISH TASKS')
                 if not self.should_quit:
+                    # print('WAIT FOR VALIDATORS TO FINISH TASKS')
                     for validator in self.validators:
                         validator.queue.join()
-                        print(f"{validator.validator.counter} IS FINISHED")
+                        # print(f"{validator.validator.counter} IS FINISHED")
                     recv_event = queue_element_or_none(self.queue)
                     while recv_event is not None:
                         # noinspection PyArgumentList
                         recv_actions[type(recv_event)](recv_event)
-                        print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
+                        # print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
                         if recv_event.time < self.simulator_time:
                             print(f'[WARNING] Shall distribute event for the past! {recv_event}')
                         recv_event = queue_element_or_none(self.queue)
                 current_time_events = tuple(self.__collect_events_upto_current_time())
-
-        print('Hello World!')
 
     def __collect_events_upto_current_time(self, progress_time=False) -> Iterable[Event]:
         element = queue_element_or_none(self.events)
@@ -287,7 +285,7 @@ def test():
     for i in range(64):
         simulator.add_validator(args.configpath, args.configname, args.cryptokeys)
     simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((6 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((5 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
     simulator.start_simulation()
 
 
