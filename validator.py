@@ -1,3 +1,4 @@
+import cProfile
 import json
 import sys
 import traceback
@@ -74,6 +75,9 @@ class Validator(Process):
         self.debugfile = None
         self.colorstep = 2
         self.mycolor = '#7FFFFF'
+        self.profile = False
+        if self.counter % 14 == 0:
+            self.profile = True
 
     def __debug(self, obj, typ: str):
         if not self.debug:
@@ -116,10 +120,16 @@ class Validator(Process):
         # noinspection PyTypeChecker
         reload(spec)
         spec.bls.bls_active = False
+        if self.profile:
+            pr = cProfile.Profile()
+            pr.enable()
         while not self.should_quit:
             item = self.recv_queue.get()
             self.__handle_event(item)
             self.recv_queue.task_done()
+        if self.profile:
+            pr.disable()
+            pr.dump_stats(f"profile_{self.index}_{time()}.prof")
         if self.debug:
             print(f'{self.index} Write Log file')
             self.debugfile.close()
