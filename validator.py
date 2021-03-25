@@ -388,31 +388,7 @@ class Validator(Process):
 
     def handle_attestation(self, attestation: spec.Attestation):
         self.__debug(attestation, 'AttestationRecv')
-        previous_epoch = spec.get_previous_epoch(self.state)
-        attestation_epoch = spec.compute_epoch_at_slot(attestation.data.slot)
-        if attestation_epoch >= previous_epoch:
-            self.attestation_cache.add_attestation(attestation)
-        else:
-            print(f"[WARNING] Validator {self.index} received Attestation for the past")
-            self.__debug(attestation_epoch, "AttestationPastEpochWarning")
-        if spec.get_current_slot(self.store) > attestation.data.slot:
-            # Only validate attestations for previous epochs
-            # Attestations for the current epoch are validated on slot boundaries
-            try:
-                if attestation.data.beacon_block_root in self.store.blocks:
-                    # Only validate attestations for known blocks. Try again later otherwise.
-                    spec.on_attestation(self.store, attestation)
-                else:
-                    # print(f"[VALIDATOR {self.index}] Received Attestation for unknown block {attestation.data.beacon_block_root}")
-                    self.__debug(spec.get_indexed_attestation(self.state, attestation), 'AttestationBlockLookupError')
-            except AssertionError as e:
-                _, _, tb = sys.exc_info()
-                traceback.print_tb(tb)
-                tb_info = traceback.extract_tb(tb)
-                filename, line, func, text = tb_info[-1]
-                print(f'[VALIDATOR {self.index}] Could not check attestation (assert line {line}, stmt {text})! {str(attestation.data)}!')
-                self.__debug(spec.get_indexed_attestation(self.state, attestation), 'UnexpectedAttestationAssertionError')
-
+        self.attestation_cache.add_attestation(attestation)
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
         # TODO check signature
@@ -429,7 +405,7 @@ class Validator(Process):
 
         # Process the new block now
         self.__debug({
-            'root': spec.hash_tree_root(block),
+            'root': spec.hash_tree_root(block.message),
             'parent': block.message.parent_root,
             'proposer': block.message.proposer_index
         }, 'BlockRecv')
