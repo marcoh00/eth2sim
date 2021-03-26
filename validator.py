@@ -194,7 +194,7 @@ class Validator(Process):
             next_task = queue_element_or_none(self.recv_queue)
         self.should_quit = True
         if self.index == 60:
-            self.__graph()
+            self.graph()
         print(f'Goodbye from {self.index}!')
 
     @staticmethod
@@ -237,10 +237,16 @@ class Validator(Process):
         #
         # ep(target) == ep(now) => cp_justified == cp_source
         # <=> ep(target) != ep(now) v cp_justified == cp_source
+        min_slot_to_include = spec.compute_start_slot_at_epoch(
+            spec.compute_epoch_at_slot(self.current_slot)
+        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
+        max_slot_to_include = self.current_slot - 1
         candidate_attestations = tuple(
             attestation
-            for attestation in self.attestation_cache.all_attestations_with_unseen_validators(
-                spec.get_current_slot(self.store) - 1)
+            for attestation in self.attestation_cache.attestations_not_seen_in_block(
+                min_slot_to_include,
+                max_slot_to_include
+            )
             if attestation.data.target.epoch != spec.get_current_epoch(self.state)
             or self.state.current_justified_checkpoint == attestation.data.source
         )
@@ -255,7 +261,11 @@ class Validator(Process):
 
         # TODO implement slashings
         proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list()
-        attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list()
+        attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
+            self.attestation_cache.search_slashings()
+        )
+        if len(attester_slashings) > spec.MAX_ATTESTER_SLASHINGS:
+            attester_slashings = attester_slashings[0:spec.MAX_ATTESTER_SLASHINGS]
         if len(candidate_attestations) <= spec.MAX_ATTESTATIONS:
             attestations = candidate_attestations
         else:
@@ -299,7 +309,7 @@ class Validator(Process):
             fromidx=self.index,
             toidx=None
         ))
-        self.__graph(show=False)
+        self.graph(show=False)
         self.__debug(signed_block, 'ProposeBlock')
 
     def handle_next_slot_event(self, message: NextSlotEvent):
@@ -310,13 +320,19 @@ class Validator(Process):
             self.update_committee()
 
         # Keep two epochs of past attestations
-        self.attestation_cache.cleanup(spec.Slot(message.slot), spec.SLOTS_PER_EPOCH)
+        min_slot_to_keep = spec.compute_start_slot_at_epoch(
+            spec.compute_epoch_at_slot(self.current_slot) - 1
+        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
+        self.attestation_cache.cleanup_time_cache(min_slot_to_keep)
 
-        # Handle last slot's attestations
-        for slot, committee, attestation in self.attestation_cache.attestations(spec.Slot(message.slot) - 1):
+        # Handle up to last slot's attestations
+        for attestation in self.attestation_cache.attestations_not_known_to_forkchoice(
+                spec.Slot(0),
+                max(self.current_slot - 1, 0)):
             try:
                 if attestation.data.beacon_block_root in self.store.blocks:
                     spec.on_attestation(self.store, attestation)
+                    self.attestation_cache.accept_attestation(attestation, forkchoice=True)
             except AssertionError:
                 print(f'[VALIDATOR {self.index}] Could not validate attestation')
                 self.__debug(attestation, 'ValidateAttestationOnSlotBoundaryError')
@@ -347,10 +363,11 @@ class Validator(Process):
         if not spec.is_aggregator(self.state, spec.Slot(message.slot), self.committee[1], slot_signature):
             return
         attestations_to_aggregate = [
-            attestation
-            for attestation
-            in self.attestation_cache.attestation_cache[spec.Slot(message.slot)][self.committee[1]]
-            if attestation.data == self.last_attestation_data and popcnt(attestation.aggregation_bits) == 1
+            attestationcache.attestation
+            for attestationcache
+            in self.attestation_cache.cache_by_time[spec.Slot(message.slot)][self.committee[1]]
+            if attestationcache.attestation.data == self.last_attestation_data
+            and len(attestationcache.attesting_indices) == 1
         ]
         aggregation_bits = list(0 for _ in range(len(self.committee[0])))
 
@@ -388,7 +405,7 @@ class Validator(Process):
 
     def handle_attestation(self, attestation: spec.Attestation):
         self.__debug(attestation, 'AttestationRecv')
-        self.attestation_cache.add_attestation(attestation)
+        self.attestation_cache.add_attestation(attestation, self.state)
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
         # TODO check signature
@@ -421,7 +438,7 @@ class Validator(Process):
                 spec.on_block(self.store, cblock)
                 self.block_cache.accept_block(cblock)
                 for attestation in block.message.body.attestations:
-                    self.attestation_cache.add_attestation(attestation, from_block=True)
+                    self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
             except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb)
@@ -481,7 +498,7 @@ class Validator(Process):
             signature=spec.get_attestation_signature(self.state, attestation_data, self.privkey)
         )
 
-        self.attestation_cache.add_attestation(attestation)
+        self.attestation_cache.add_attestation(attestation, self.state)
         self.last_attestation_data = attestation_data
         self.slot_last_attested = head_state.slot
 
@@ -502,8 +519,7 @@ class Validator(Process):
         self.head_root = spec.get_head(self.store)
         self.state = self.store.block_states[self.head_root]
 
-
-    def __graph(self, show=True):
+    def graph(self, show=True):
         g = Digraph('G', filename=f'graph_{int(time())}_{self.index}.gv')
         blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
         for root, block in self.store.blocks.items():

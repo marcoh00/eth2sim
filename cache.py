@@ -1,11 +1,143 @@
-from typing import Dict, List, Set, Optional, Sequence
+from dataclasses import dataclass
+from typing import Dict, List, Set, Optional, Sequence, Iterable
 
+import remerkleable
 from remerkleable.basic import uint64
 
 from eth2spec.phase0 import spec
+from eth2spec.utils.ssz import ssz_typing
 from helpers import popcnt, indices_inside_committee
 
 
+@dataclass
+class CachedAttestation:
+    attesting_indices: ssz_typing.List[spec.ValidatorIndex, spec.MAX_VALIDATORS_PER_COMMITTEE]
+    seen_in_block: bool
+    known_to_forkchoice: bool
+    attestation: spec.Attestation
+
+    def into_indexed_attestation(self) -> spec.IndexedAttestation:
+        return spec.IndexedAttestation(
+            attesting_indices=self.attesting_indices,
+            data=self.attestation.data,
+            signature=self.attestation.signature
+        )
+
+    @classmethod
+    def from_attestation(cls, attestation: spec.Attestation, state: spec.BeaconState):
+        indexed_attestation = spec.get_indexed_attestation(state, attestation)
+        return cls(
+            attesting_indices=indexed_attestation.attesting_indices,
+            seen_in_block=False,
+            known_to_forkchoice=False,
+            attestation=attestation
+        )
+
+
+class AttestationCache:
+    cache_by_time: Dict[spec.Slot, Dict[spec.CommitteeIndex, List[CachedAttestation]]]
+    cache_by_validator: Dict[spec.ValidatorIndex, List[CachedAttestation]]
+
+    def __init__(self):
+        self.cache_by_time = dict()
+        self.cache_by_validator = dict()
+
+    def add_attestation(self, attestation: spec.Attestation, state: spec.BeaconState, seen_in_block=False):
+        existing_cached_attestation = self.__find_attestaion(attestation)
+        if existing_cached_attestation is not None:
+            if seen_in_block:
+                existing_cached_attestation.seen_in_block = True
+            return
+        cached_attestation = CachedAttestation.from_attestation(attestation, state)
+        cached_attestation.seen_in_block = seen_in_block
+        slot, committee = attestation.data.slot, attestation.data.index
+
+        self.__ensure_key_exists(self.cache_by_time, slot, dict)
+        self.__ensure_key_exists(self.cache_by_time[slot], committee, list)
+        self.cache_by_time[slot][committee].append(cached_attestation)
+        for validator in cached_attestation.attesting_indices:
+            self.__ensure_key_exists(self.cache_by_validator, validator, list)
+            self.cache_by_validator[validator].append(cached_attestation)
+
+    def accept_attestation(self, attestation: spec.Attestation, forkchoice=False, block=False):
+        cached_attestation = self.__find_attestaion(attestation)
+        if forkchoice:
+            cached_attestation.known_to_forkchoice = True
+        if block:
+            cached_attestation.seen_in_block = True
+
+    def attestations_not_known_to_forkchoice(self, min_slot: spec.Slot, max_slot: spec.Slot)\
+            -> Iterable[spec.Attestation]:
+        yield from self.filter_attestations(min_slot, max_slot, lambda a: not a.known_to_forkchoice)
+
+    def attestations_not_seen_in_block(self, min_slot: spec.Slot, max_slot: spec.Slot) -> Iterable[spec.Attestation]:
+        yield from self.filter_attestations(min_slot, max_slot, lambda a: not a.seen_in_block)
+
+    def filter_attestations(self, min_slot: spec.Slot, max_slot: spec.Slot, filter_func) -> Iterable[spec.Attestation]:
+        for slot in self.cache_by_time.keys():
+            if min_slot <= slot <= max_slot:
+                for committee, attestations in self.cache_by_time[slot].items():
+                    for attestation in attestations:
+                        if filter_func(attestation):
+                            yield attestation.attestation
+
+    def cleanup_time_cache(self, min_slot: spec.Slot):
+        self.cleanup_old_time_cache_attestations(min_slot)
+        self.cleanup_redundant_time_cache_attestations()
+
+    def cleanup_redundant_time_cache_attestations(self):
+        for slot, committee_list_dict in self.cache_by_time.items():
+            for committee in committee_list_dict.keys():
+                attestations = self.cache_by_time[slot][committee]
+                attestations.sort(key=lambda a: len(a.attesting_indices), reverse=True)
+                kept_attestations = []
+                validators_seen_in_kept_attestations = set()
+                for attestation in attestations:
+                    # Here be dragons. We dont compare fork choice-known or seen-in-block fields yet!
+                    if any(validator not in validators_seen_in_kept_attestations for validator in attestation.attesting_indices):
+                        kept_attestations.append(attestation)
+                        for validator in attestation.attesting_indices:
+                            validators_seen_in_kept_attestations.add(validator)
+                self.cache_by_time[slot][committee] = kept_attestations
+
+    def cleanup_old_time_cache_attestations(self, min_slot: spec.Slot):
+        slots_to_clean = tuple(slot for slot in self.cache_by_time.keys() if slot < min_slot)
+        for slot in slots_to_clean:
+            del self.cache_by_time[slot]
+
+    def search_slashings(self, validator: Optional[spec.ValidatorIndex] = None):
+        if validator is not None:
+            yield from self.__search_slashings(validator)
+        else:
+            for validator in self.cache_by_validator.keys():
+                yield from self.__search_slashings(validator)
+
+    def __search_slashings(self, validator: spec.ValidatorIndex):
+        for i in range(len(self.cache_by_validator[validator])):
+            for j in range(i, len(self.cache_by_validator[validator])):
+                if spec.is_slashable_attestation_data(
+                    self.cache_by_validator[validator][i].attestation.data,
+                    self.cache_by_validator[validator][j].attestation.data
+                ):
+                    yield spec.AttesterSlashing(
+                        attestation1=self.cache_by_validator[validator][i].into_indexed_attestation(),
+                        attestation2=self.cache_by_validator[validator][j].into_indexed_attestation()
+                    )
+
+    def __find_attestaion(self, attestation: spec.Attestation) -> Optional[CachedAttestation]:
+        slot, committee = attestation.data.slot, attestation.data.index
+        if slot in self.cache_by_time and committee in self.cache_by_time[slot]:
+            for cached_attestation in self.cache_by_time[slot][committee]:
+                if cached_attestation.attestation == attestation:
+                    return cached_attestation
+        return None
+
+    @staticmethod
+    def __ensure_key_exists(target: dict, key, default_generator):
+        if key not in target:
+            target[key] = default_generator()
+
+"""
 class AttestationCache:
     attestation_cache: Dict[spec.Slot, Dict[spec.CommitteeIndex, List[spec.Attestation]]]
     seen_in_block: Dict[spec.Slot, Dict[spec.CommitteeIndex, Set[uint64]]]
@@ -104,7 +236,7 @@ class AttestationCache:
 
     def __str__(self):
         print(str(self.attestation_cache))
-
+"""
 
 class BlockCache:
     blocks: Dict[spec.Root, spec.SignedBeaconBlock]
