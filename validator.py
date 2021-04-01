@@ -259,17 +259,18 @@ class Validator(Process):
         randao_reveal = spec.get_epoch_signature(head_state, block, self.privkey)
         eth1_data = head_state.eth1_data
 
-        # TODO implement slashings
-        proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list()
+        proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list(
+            self.block_cache.search_slashings()
+        )
         attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
             self.attestation_cache.search_slashings()
         )
+        if len(proposer_slashings) > spec.MAX_PROPOSER_SLASHINGS:
+            proposer_slashings = proposer_slashings[0:spec.MAX_PROPOSER_SLASHINGS]
         if len(attester_slashings) > spec.MAX_ATTESTER_SLASHINGS:
             attester_slashings = attester_slashings[0:spec.MAX_ATTESTER_SLASHINGS]
-        if len(candidate_attestations) <= spec.MAX_ATTESTATIONS:
-            attestations = candidate_attestations
-        else:
-            attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
+        if len(candidate_attestations) > spec.MAX_ATTESTATIONS:
+            candidate_attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
 
         deposits: List[spec.Deposit, spec.MAX_DEPOSITS] = list()
         voluntary_exits: List[spec.VoluntaryExit, spec.MAX_VOLUNTARY_EXITS] = list()
@@ -280,7 +281,7 @@ class Validator(Process):
             graffiti=spec.Bytes32(bytes(255 for _ in range(0, 32))),
             proposer_slashings=proposer_slashings,
             attester_slashings=attester_slashings,
-            attestations=attestations,
+            attestations=candidate_attestations,
             deposits=deposits,
             voluntary_exits=voluntary_exits
         )
@@ -437,6 +438,10 @@ class Validator(Process):
             try:
                 spec.on_block(self.store, cblock)
                 self.block_cache.accept_block(cblock)
+                for aslashing in cblock.message.body.attester_slashings:
+                    self.attestation_cache.accept_slashing(aslashing)
+                for pslashing in cblock.message.body.proposer_slashings:
+                    self.block_cache.accept_slashing(pslashing)
                 for attestation in block.message.body.attestations:
                     self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
             except AssertionError:
