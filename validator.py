@@ -231,7 +231,7 @@ class Validator(Process):
             spec.ValidatorIndex(self.index)
         )
 
-    def propose_block(self, head_state: spec.BeaconState):
+    def propose_block(self, head_state: spec.BeaconState, other=False):
         # If the attestation's target epoch is the current epoch,
         # the source checkpoint must match with the proposer's
         #
@@ -260,10 +260,18 @@ class Validator(Process):
         eth1_data = head_state.eth1_data
 
         proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list(
-            self.block_cache.search_slashings()
+            slashing for slashing in self.block_cache.search_slashings()
+            if spec.is_slashable_validator(
+                head_state.validators[slashing.signed_header_1.message.proposer_index],
+                spec.get_current_epoch(head_state)
+            )
         )
         attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
-            self.attestation_cache.search_slashings()
+            slashing for slashing in self.attestation_cache.search_slashings()
+            if all(
+                spec.is_slashable_validator(head_state.validators[vindex], spec.get_current_epoch(head_state))
+                for vindex in set(slashing.attestation_1.attesting_indices)
+                    .intersection(set(slashing.attestation_2.attesting_indices)))
         )
         if len(proposer_slashings) > spec.MAX_PROPOSER_SLASHINGS:
             proposer_slashings = proposer_slashings[0:spec.MAX_PROPOSER_SLASHINGS]
@@ -271,6 +279,8 @@ class Validator(Process):
             attester_slashings = attester_slashings[0:spec.MAX_ATTESTER_SLASHINGS]
         if len(candidate_attestations) > spec.MAX_ATTESTATIONS:
             candidate_attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
+        if other:
+            candidate_attestations = candidate_attestations[0:len(candidate_attestations) - 2]
 
         deposits: List[spec.Deposit, spec.MAX_DEPOSITS] = list()
         voluntary_exits: List[spec.VoluntaryExit, spec.MAX_VOLUNTARY_EXITS] = list()
@@ -290,7 +300,7 @@ class Validator(Process):
             new_state_root = spec.compute_new_state_root(self.state, block)
         except AssertionError as e:
             _, _, tb = sys.exc_info()
-            traceback.print_tb(tb) # Fixed format
+            traceback.print_tb(tb)
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
             self.__debug(text, 'FindNewStateRootError')
@@ -346,9 +356,12 @@ class Validator(Process):
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
 
         # Propose block if needed
-        if spec.ValidatorIndex(self.index) == self.proposer_current_slot:
+        if spec.ValidatorIndex(self.index) == self.proposer_current_slot and not self.__slashed():
             print(f"[VALIDATOR {self.index}] I'M PROPOSER!!!")
-            return self.propose_block(head_state)
+            self.propose_block(head_state)
+            if message.slot == 4:
+                print('YOLO')
+                self.propose_block(head_state, True)
 
     def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested is None:
@@ -441,6 +454,7 @@ class Validator(Process):
                 for aslashing in cblock.message.body.attester_slashings:
                     self.attestation_cache.accept_slashing(aslashing)
                 for pslashing in cblock.message.body.proposer_slashings:
+                    print(f"!!!!!!!! SLASHING DETECTED {pslashing} !!!!!!!")
                     self.block_cache.accept_slashing(pslashing)
                 for attestation in block.message.body.attestations:
                     self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
@@ -468,6 +482,8 @@ class Validator(Process):
         actions[message.message_type](payload)
 
     def attest(self):
+        if self.__slashed():
+            return
         if self.committee is None:
             self.update_committee()
         if not (self.current_slot == self.committee[2] and self.index in self.committee[0]):
@@ -523,6 +539,9 @@ class Validator(Process):
     def __compute_head(self):
         self.head_root = spec.get_head(self.store)
         self.state = self.store.block_states[self.head_root]
+
+    def __slashed(self) -> bool:
+        return self.state.validators[self.index].slashed
 
     def graph(self, show=True):
         g = Digraph('G', filename=f'graph_{int(time())}_{self.index}.gv')

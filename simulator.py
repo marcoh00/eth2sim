@@ -285,7 +285,7 @@ def test():
     for i in range(64):
         simulator.add_validator(args.configpath, args.configname, args.cryptokeys)
     simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((3 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
+    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((8 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
     simulator.start_simulation()
 
 

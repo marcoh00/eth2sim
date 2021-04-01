@@ -270,7 +270,7 @@ class BlockCache:
     # For additional (slashed) blocks at the same height
     outstanding: Set[spec.Root]
 
-    slashable: Set[spec.Root]
+    slashable: Set[Tuple[spec.Root]]
     slashed: Dict[spec.ValidatorIndex, Tuple[spec.Root, spec.Root]]
 
     def __init__(self, genesis: spec.BeaconBlock):
@@ -297,20 +297,18 @@ class BlockCache:
         self.outstanding.add(root)
         block_root_current_slot = self.accepted[block.message.slot]
         if block_root_current_slot is not None and not block_root_current_slot == root:
-            self.slashable.add(root)
-            raise ValueError('Second block at same height!')
+            self.slashable.add((block_root_current_slot, root))
+            # raise ValueError('Second block at same height!')
 
     def search_slashings(self) -> Iterable[spec.ProposerSlashing]:
-        for slashable_root in self.slashable:
-            slashable_block = self.blocks[slashable_root]
-            original_root = self.accepted[slashable_block.message.slot]
-            original_block = self.blocks[original_root]
+        for root1, root2 in self.slashable:
+            slashable_block = self.blocks[root1]
+            original_block = self.blocks[root2]
             assert original_block.message.proposer_index == slashable_block.message.proposer_index
 
             # Already slashed?
             proposer = slashable_block.message.proposer_index
-            if (original_root, slashable_root) not in self.slashed[proposer]\
-                    and (slashable_root, original_root) not in self.slashed[proposer]:
+            if proposer not in self.slashed:
                 yield self.__produce_slashing(original_block, slashable_block)
 
     @staticmethod

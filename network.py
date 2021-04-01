@@ -14,7 +14,7 @@ class Network(object):
         self.random = np.random.RandomState(seed=rand)
 
     def __latency(self) -> uint64:
-        random_latency = uint64(int(max(0, self.random.normal(1, 2))))
+        random_latency = uint64(int(max(0, self.random.normal(2, 3))))
         return random_latency if USE_RANDOM_LATENCY else uint64(0)
 
     # noinspection PyUnusedLocal
