@@ -1,33 +1,24 @@
-import argparse
-import multiprocessing
 import queue
-import random
-from datetime import datetime
-from multiprocessing import Queue, JoinableQueue
-from pathlib import Path
-from typing import Optional, List, Sequence, Tuple, Iterable
-
 from dataclasses import dataclass
-from py_ecc.bls12_381 import curve_order
+from multiprocessing import Queue, JoinableQueue
+from typing import Optional, List, Sequence, Iterable
+
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 import eth2spec.phase0.spec as spec
-from eth2spec.config import config_util
+from beaconclient import BeaconClient
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
-    Event, MESSAGE_TYPE, RequestDeposit
+    Event, MESSAGE_TYPE
 from helpers import queue_element_or_none
 from network import Network
-from pathvalidation import valid_writable_path
-from validator import Validator
-from importlib import reload
 
 
 @dataclass
-class IndexedValidator(object):
+class IndexedBeaconClient(object):
     queue: JoinableQueue
-    validator: Validator
+    beacon_client: BeaconClient
 
 
 class Simulator:
@@ -35,7 +26,7 @@ class Simulator:
     genesis_time: uint64
     simulator_time: uint64
     slot: spec.Slot
-    validators: List[IndexedValidator]
+    clients: List[IndexedBeaconClient]
     network: Network
     events: queue.Queue[Event]
     past_events: List[Event]
@@ -47,7 +38,7 @@ class Simulator:
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
         self.slot = spec.Slot(0)
-        self.validators = []
+        self.clients = []
         self.network = Network(self, int.from_bytes(rand[0:4], "little"))
         self.events = queue.PriorityQueue()
         self.past_events = list()
@@ -57,16 +48,6 @@ class Simulator:
 
     def normalized_simulator_time(self):
         return self.simulator_time - self.genesis_time
-
-    def add_validator(self, configpath: str, configname: str, keys: Optional[str]):
-        print(f'[CREATE] Validator {len(self.validators)}')
-        debug = False
-        if len(self.validators) % 1 == 0:
-            debug = True
-        validator_queue = JoinableQueue()
-        self.validators.append(
-            IndexedValidator(validator_queue, Validator(len(self.validators), validator_queue, self.queue, configpath, configname, keys, debug))
-        )
 
     def next_slot_event(self):
         self.events.put(
@@ -89,59 +70,57 @@ class Simulator:
                  self.slot)
         )
 
-    def generate_genesis(self, eth1_blockhash):
+    def generate_genesis(self):
         deposit_data = []
         deposits = []
 
-        print('Generate Genesis state')
-        for validator in self.validators:
-            deposit, root, deposit_data = build_deposit(
-                spec=spec,
-                deposit_data_list=deposit_data,
-                pubkey=validator.validator.pubkey,
-                privkey=validator.validator.privkey,
-                amount=spec.MAX_EFFECTIVE_BALANCE,
-                withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.validator.pubkey)[1:],
-                signed=True
-            )
-            deposits.append(deposit)
+        print('[SIMULATOR] Generate Genesis state')
         eth1_timestamp = spec.MIN_GENESIS_TIME
+        for client in self.clients:
+            for validator in client.beacon_client.validators:
+                deposit, root, deposit_data = build_deposit(
+                    spec=spec,
+                    deposit_data_list=deposit_data,
+                    pubkey=validator.pubkey,
+                    privkey=validator.privkey,
+                    amount=validator.startbalance,
+                    withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
+                    signed=True
+                )
+                deposits.append(deposit)
 
-        genesis_state = spec.initialize_beacon_state_from_eth1(eth1_blockhash, eth1_timestamp, deposits)
+        genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
         assert spec.is_valid_genesis_state(genesis_state)
         genesis_block = spec.BeaconBlock(state_root=spec.hash_tree_root(genesis_state))
 
         encoded_state = genesis_state.encode_bytes()
         encoded_block = genesis_block.encode_bytes()
 
-        print('Start Validator processes')
-        color_step = min((0xFFFFFF - 0x7F7F7F) // len(self.validators), 0x27F)
-        for validator in self.validators:
-            validator.validator.colorstep = color_step
-            validator.validator.start()
-            validator.queue.put(MessageEvent(
+        print(f'[SIMULATOR] Genesis state known. First block is {spec.hash_tree_root(genesis_block)}')
+        print('[SIMULATOR] Start Validator processes')
+        for client in self.clients:
+            client.beacon_client.start()
+            client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
                 message=encoded_state,
                 message_type='BeaconState',
                 fromidx=0,
                 toidx=None
             ))
-            validator.queue.put(MessageEvent(
+            client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
                 message=encoded_block,
                 message_type='BeaconBlock',
                 fromidx=0,
                 toidx=None
             ))
-            # vqueue.put(SimulationEndEvent(time=uint64(0)))
-        for validator in self.validators:
-            validator.queue.join()
-            # validator.join()
+        for client in self.clients:
+            client.queue.join()
 
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
-        print('[GENESIS] Alright')
+        print('[SIMULATOR] Initialization complete')
 
     def handle_next_slot_event(self, event: NextSlotEvent):
         if event.slot % spec.SLOTS_PER_EPOCH == 0:
@@ -161,9 +140,9 @@ class Simulator:
 
     def __distribute_event(self, event: Event, receiver: Optional[int] = None):
         if receiver is not None:
-            self.validators[receiver].queue.put(event)
+            self.clients[receiver].queue.put(event)
             return
-        for validator in self.validators:
+        for validator in self.clients:
             validator.queue.put(event)
 
     def __distribute_message_event(self, event: MessageEvent):
@@ -177,7 +156,7 @@ class Simulator:
             self.network.delay(event)
             self.events.put(event)
         else:
-            for index in range(len(self.validators)):
+            for index in range(len(self.clients)):
                 event_with_receiver = MessageEvent(
                     time=event.time,
                     message=event.message,
@@ -189,9 +168,9 @@ class Simulator:
                 self.events.put(event_with_receiver)
 
     def __recv_end_event(self, event: SimulationEndEvent):
-        for validator in self.validators:
+        for validator in self.clients:
             validator.queue.put(event)
-            validator.validator.join()
+            validator.beacon_client.join()
         if event.message:
             print(f'---------- !!!!! {event.message} !!!!! ----------')
         self.should_quit = True
@@ -221,7 +200,7 @@ class Simulator:
                     send_actions[type(event)](event)
                 if not self.should_quit:
                     # print('WAIT FOR VALIDATORS TO FINISH TASKS')
-                    for validator in self.validators:
+                    for validator in self.clients:
                         validator.queue.join()
                         # print(f"{validator.validator.counter} IS FINISHED")
                     recv_event = queue_element_or_none(self.queue)
@@ -259,42 +238,5 @@ class Simulator:
             for validatoridx in toidx:
                 self.network.send(fromidx, validatoridx, message)
         else:
-            for validator in self.validators:
+            for validator in self.clients:
                 self.network.send(fromidx, spec.ValidatorIndex(validator.index), message)
-
-
-def test():
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--configpath', type=str, required=False, default='../../configs')
-    parser.add_argument('--configname', type=str, required=False, default='minimal')
-    parser.add_argument('--cryptokeys', type=valid_writable_path, required=False, default='./cryptokeys')
-    # parser.add_argument('--state', type=valid_writable_path, required=False, default='./state')
-    parser.add_argument('--eth1blockhash', type=bytes.fromhex, required=False, default=random.randbytes(32).hex())
-    args = parser.parse_args()
-    config_util.prepare_config(args.configpath, args.configname)
-    # noinspection PyTypeChecker
-    reload(spec)
-    simulator = Simulator(args.eth1blockhash)
-    spec.bls.bls_active = False
-
-    print('Ethereum 2.0 Beacon Chain Simulator')
-    print(f'Beacon Chain Configuration: {spec.CONFIG_NAME}')
-    print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
-    print(f'Cryptographic Keys: {args.cryptokeys}')
-
-    for i in range(64):
-        simulator.add_validator(args.configpath, args.configname, args.cryptokeys)
-    simulator.generate_genesis(args.eth1blockhash)
-    simulator.events.put(SimulationEndEvent(simulator.genesis_time + uint64((8 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)))
-    simulator.start_simulation()
-
-
-if __name__ == '__main__':
-    start = datetime.now()
-    try:
-        multiprocessing.set_start_method("spawn")
-        test()
-        end = datetime.now()
-    except KeyboardInterrupt:
-        end = datetime.now()
-    print(f"{end-start}")
