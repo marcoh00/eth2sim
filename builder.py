@@ -47,10 +47,10 @@ class ValidatorBuilder(Builder):
     def register(self, child_builder):
         pass
 
-    def keydir(self, keydir):
+    def set_keydir(self, keydir):
         self.keydir = keydir
 
-    def startbalance(self, balance):
+    def set_startbalance(self, balance):
         self.startbalance = balance
 
 
@@ -105,11 +105,13 @@ class BeaconClientBuilder(Builder):
         for _ in range(self.validators_count):
             self.validator_builders.append(child_builder)
 
-    def debug(self, flag=False):
+    def set_debug(self, flag=False):
         self.debug = flag
+        return self
 
-    def profile(self, flag=False):
+    def set_profile(self, flag=False):
         self.profile = flag
+        return self
 
     def validators(self, count):
         self.validators_count = count
@@ -166,7 +168,7 @@ class SimulationBuilder(Builder):
         simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time))
         return simulator
 
-    def end_time(self, end_time):
+    def set_end_time(self, end_time):
         self.end_time = end_time
 
     def register(self, child_builder):

@@ -28,15 +28,19 @@ def main():
     print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
 
-    simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash) \
-        .beacon_client(4) \
-        .validators(18) \
-        .build() \
-        .build() \
+    simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash).beacon_client(4)\
+        .validators(20)\
+        .build()\
+        .build()\
+        .beacon_client(1)\
+        .set_debug(True)\
+        .set_profile(True)\
+        .validators(5)\
+        .build()\
+        .build()\
         .build()
     simulator.generate_genesis()
     simulator.start_simulation()
-
 
 if __name__ == '__main__':
     start = datetime.now()

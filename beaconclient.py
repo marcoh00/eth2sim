@@ -343,7 +343,7 @@ class BeaconClient(Process):
                 attestationcache.attestation
                 for attestationcache
                 in self.attestation_cache.cache_by_time.get(slot, dict()).get(committee, list())
-                if attestationcache.attestation.data == self.last_attestation_data[committee]
+                if committee in self.last_attestation_data and attestationcache.attestation.data == self.last_attestation_data[committee]
                 and len(attestationcache.attesting_indices) == 1
             ]
         for (validator_index, validator) in attesting_validators.items():
