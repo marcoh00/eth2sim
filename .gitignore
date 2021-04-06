@@ -8,3 +8,11 @@ __pycache__/
 
 cryptokeys/
 state/
+
+*.json
+*.pdf
+*.gv
+*.profile
+*.prof
+*.txt
+*.svg

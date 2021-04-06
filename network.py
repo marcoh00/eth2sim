@@ -14,7 +14,7 @@ class Network(object):
         self.random = np.random.RandomState(seed=rand)
 
     def __latency(self) -> uint64:
-        random_latency = uint64(int(max(0, self.random.normal(1, 1))))
+        random_latency = uint64(int(max(0, self.random.normal(2, 3))))
         return random_latency if USE_RANDOM_LATENCY else uint64(0)
 
     # noinspection PyUnusedLocal
@@ -24,3 +24,6 @@ class Network(object):
     def send(self, fromidx: spec.ValidatorIndex, toidx: spec.ValidatorIndex, message: MESSAGE_TYPE):
         time = self.simulator.simulator_time + self.latency(fromidx, toidx)
         self.simulator.events.put(MessageEvent(time, message, fromidx, toidx))
+
+    def delay(self, message: MessageEvent):
+        message.time = message.time + self.latency(message.fromidx, message.toidx)
