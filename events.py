@@ -39,6 +39,21 @@ class AggregateOpportunity(Event):
 
 
 @dataclass
+class TargetedEvent(Event):
+    toidx: Optional[int]
+
+
+@dataclass
+class ProduceStatisticsEvent(TargetedEvent):
+    pass
+
+
+@dataclass
+class ProduceGraphEvent(TargetedEvent):
+    show: bool
+
+
+@dataclass
 class MessageEvent(Event):
     message: bytes
     message_type: str

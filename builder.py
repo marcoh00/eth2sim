@@ -1,12 +1,12 @@
 from multiprocessing import Queue, JoinableQueue
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 from beaconclient import BeaconClient
 from eth2spec.phase0 import spec
-from events import SimulationEndEvent
+from events import SimulationEndEvent, ProduceStatisticsEvent, ProduceGraphEvent
 from simulator import Simulator, IndexedBeaconClient
 from validator import Validator
 
@@ -129,6 +129,8 @@ class SimulationBuilder(Builder):
     rand: ByteVector
     current_child_count: int
     end_time: uint64
+    statproducers: List[Tuple[int, int]]
+    graphproducers: List[Tuple[int, int, bool]]
 
     beacon_client_builders: List[BeaconClientBuilder]
 
@@ -139,6 +141,8 @@ class SimulationBuilder(Builder):
         self.configname = configname
         self.rand = rand
         self.end_time = uint64((8 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)
+        self.statproducers = []
+        self.graphproducers = []
 
     def beacon_client(self, count):
         self.current_child_count = count
@@ -166,10 +170,23 @@ class SimulationBuilder(Builder):
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
         simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time))
+        for client, time in self.statproducers:
+            simulator.events.put(ProduceStatisticsEvent(simulator.genesis_time + time, client))
+        for client, time, show in self.graphproducers:
+            simulator.events.put(ProduceGraphEvent(simulator.genesis_time + time, client, show))
         return simulator
 
     def set_end_time(self, end_time):
         self.end_time = end_time
+        return self
+
+    def add_statistics_output(self, client, time):
+        self.statproducers.append((client, time))
+        return self
+
+    def add_graph_output(self, client, time, show):
+        self.graphproducers.append((client, time, show))
+        return self
 
     def register(self, child_builder):
         for _ in range(self.current_child_count):

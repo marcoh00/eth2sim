@@ -10,6 +10,20 @@ from eth2spec.phase0 import spec
 from pathvalidation import valid_writable_path
 
 
+def calc_simtime(slot, epoch=None, seconds=None):
+    """
+    Calculate timestamps for slots, epochs and timedeltas in seconds
+    If only slot is specified, the start slot time is calculated.
+    If both slot and epoch are specified, slot is relative to epoch.
+    """
+    time = spec.SECONDS_PER_SLOT * slot
+    if epoch is not None:
+        time += epoch * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH
+    if seconds is not None:
+        time += seconds
+    return int(time)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--configpath', type=str, required=False, default='../../configs')
@@ -28,19 +42,26 @@ def main():
     print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
 
-    simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash).beacon_client(4)\
-        .validators(20)\
+    simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
+        .set_end_time(calc_simtime(0, 7, 0))\
+        .add_graph_output(3, calc_simtime(2, 2, 2), True)\
+        .add_statistics_output(3, calc_simtime(2, 2, 2))\
+        .add_graph_output(1, calc_simtime(5, 6, 2), True)\
+        .add_statistics_output(1, calc_simtime(5, 6, 2))\
+        .beacon_client(4)\
+        .validators(64)\
         .build()\
         .build()\
         .beacon_client(1)\
         .set_debug(True)\
         .set_profile(True)\
-        .validators(5)\
+        .validators(1)\
         .build()\
         .build()\
         .build()
     simulator.generate_genesis()
     simulator.start_simulation()
+
 
 if __name__ == '__main__':
     start = datetime.now()

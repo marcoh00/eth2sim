@@ -1,13 +1,17 @@
 import cProfile
 import json
+import pprint
 import sys
 import traceback
 from importlib import reload
 from multiprocessing import Queue, JoinableQueue
 from multiprocessing.context import Process
 from time import time
-from typing import Tuple, Optional, List, Dict
+from typing import Tuple, Optional, List, Dict, Sequence, Set
 
+from dataclasses import dataclass
+
+import dataclasses
 from graphviz import Digraph
 from remerkleable.basic import uint64
 from remerkleable.bitfields import Bitlist
@@ -17,7 +21,8 @@ import eth2spec.phase0.spec as spec
 from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent
+from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
+    ProduceStatisticsEvent, ProduceGraphEvent
 from helpers import queue_element_or_none
 from validator import Validator
 
@@ -73,8 +78,6 @@ class BeaconClient(Process):
         self.debug = debug
         self.debugfile = None
         self.profile = False
-        if self.counter % 14 == 0:
-            self.profile = True
 
     def __debug(self, obj, typ: str):
         if not self.debug:
@@ -133,7 +136,9 @@ class BeaconClient(Process):
             SimulationEndEvent: self.__handle_simulation_end,
             LatestVoteOpportunity: self.handle_latest_voting_opportunity,
             AggregateOpportunity: self.handle_aggregate_opportunity,
-            NextSlotEvent: self.handle_next_slot_event
+            NextSlotEvent: self.handle_next_slot_event,
+            ProduceStatisticsEvent: self.handle_statistics_event,
+            ProduceGraphEvent: self.produce_graph_event
         }
         # noinspection PyArgumentList,PyTypeChecker
         actions[type(event)](event)
@@ -157,6 +162,14 @@ class BeaconClient(Process):
         # noinspection PyArgumentList
         actions[event.message_type](payload)
 
+    def handle_statistics_event(self, event: ProduceStatisticsEvent):
+        stats = statistics(self)
+        pprint.pp(dataclasses.asdict(stats))
+        self.__debug(str(stats), 'Statistics')
+
+    def produce_graph_event(self, event: ProduceGraphEvent):
+        self.graph(event.show)
+
     def handle_genesis_state(self, state: spec.BeaconState):
         self.state = state
         for validator in self.validators:
@@ -176,8 +189,8 @@ class BeaconClient(Process):
             self.simulator_to_client_queue.task_done()
             next_task = queue_element_or_none(self.simulator_to_client_queue)
         self.should_quit = True
-        if self.counter == 60:
-            self.graph()
+        if self.debug:
+            self.graph(show=True)
         print(f'Goodbye from {self.counter}!')
 
     def update_committee(self, epoch: spec.Epoch):
@@ -281,7 +294,8 @@ class BeaconClient(Process):
             fromidx=self.counter,
             toidx=None
         ))
-        self.graph(show=True)
+        if self.debug:
+            self.graph(show=True)
         self.__debug(signed_block, 'ProposeBlock')
 
     def handle_next_slot_event(self, message: NextSlotEvent):
@@ -424,10 +438,10 @@ class BeaconClient(Process):
                 spec.on_block(self.store, cblock)
                 self.block_cache.accept_block(cblock)
                 for aslashing in cblock.message.body.attester_slashings:
-                    print(f"!!!!!!!! SLASHING DETECTED {aslashing} !!!!!!!")
+                    self.__debug(aslashing, 'AttesterSlashing')
                     self.attestation_cache.accept_slashing(aslashing)
                 for pslashing in cblock.message.body.proposer_slashings:
-                    print(f"!!!!!!!! SLASHING DETECTED {pslashing} !!!!!!!")
+                    self.__debug(pslashing, 'ProposerSlashing')
                     self.block_cache.accept_slashing(pslashing)
                 for attestation in block.message.body.attestations:
                     self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
@@ -592,3 +606,90 @@ class BeaconClient(Process):
         g.save()
         if show:
             g.view()
+
+# Statistics
+
+@dataclass
+class Statistics:
+    client_index: int
+    current_time: int
+    current_slot: int
+    current_epoch: int
+    head: str
+    finalized: Tuple[str, int, int]
+    justified: Tuple[str, int, int]
+    head_balance: spec.Gwei
+    finalized_balance: spec.Gwei
+    justified_balance: spec.Gwei
+    leafs: Sequence[str]
+    leafs_since_justification: Sequence[str]
+    leafs_since_finalization: Sequence[str]
+    orphans: Sequence[Tuple[str, int]]
+    attester_slashings: Sequence[int]
+    proposer_slashings: Sequence[int]
+    finality_delay: int
+    validators_left: Sequence[Tuple[spec.ValidatorIndex, int]]
+    balances: Dict[int, int]
+
+
+def statistics(client: BeaconClient) -> Statistics:
+    return Statistics(
+        client_index=client.counter,
+        current_time=client.current_time,
+        current_slot=client.current_slot,
+        current_epoch=spec.compute_epoch_at_slot(client.current_slot),
+        head=str(client.head_root),
+        finalized=(str(client.store.finalized_checkpoint.root),
+                   int(client.store.blocks[client.store.finalized_checkpoint.root].slot),
+                   int(client.store.finalized_checkpoint.epoch)),
+        justified=(str(client.store.justified_checkpoint.root),
+                   int(client.store.blocks[client.store.justified_checkpoint.root].slot),
+                   int(client.store.justified_checkpoint.epoch)),
+        head_balance=spec.get_latest_attesting_balance(client.store, client.head_root) // spec.ETH_TO_GWEI,
+        finalized_balance=spec.get_latest_attesting_balance(client.store, client.store.finalized_checkpoint.root) // spec.ETH_TO_GWEI,
+        justified_balance=spec.get_latest_attesting_balance(client.store, client.store.justified_checkpoint.root) // spec.ETH_TO_GWEI,
+        leafs=tuple(str(root) for root in get_leaf_blocks(client.store, None)),
+        leafs_since_justification=tuple(str(root) for root in get_leaf_blocks(client.store,
+                                                                              client.store.justified_checkpoint.root)),
+        leafs_since_finalization=tuple(str(root) for root in get_leaf_blocks(client.store,
+                                                                             client.store.finalized_checkpoint.root)),
+        orphans=get_orphans(client.store),
+        attester_slashings=tuple(client.attestation_cache.accepted_attester_slashings.keys()),
+        proposer_slashings=tuple(client.block_cache.slashed.keys()),
+        finality_delay=spec.get_finality_delay(client.state),
+        validators_left=tuple((spec.ValidatorIndex(v[0]), v[1].exit_epoch)
+                              for v in enumerate(client.state.validators)
+                              if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH),
+        balances={v[0]: v[1].effective_balance // spec.ETH_TO_GWEI
+                  for v in enumerate(client.state.validators)}
+    )
+
+def get_leaf_blocks(store: spec.Store, forced_parent: Optional[spec.Root]) -> Set[spec.Root]:
+    blocks = set(store.blocks.keys())
+    if forced_parent:
+        blocks = get_chain_blocks(store, forced_parent)
+
+    has_children = set()
+    for blockroot in blocks:
+        has_children.add(store.blocks[blockroot].parent_root)
+    return blocks.difference(has_children)
+
+def get_chain_blocks(store: spec.Store, base_block: spec.Root) -> Set[spec.Root]:
+    chain = set()
+    children = get_children(store, base_block)
+    while len(children) > 0:
+        chain = chain.union(children)
+        new_children = set()
+        for child in children:
+            new_children = new_children.union(get_children(store, child))
+        children = new_children
+    return chain
+
+def get_children(store: spec.Store, parent: spec.Root) -> Set[spec.Root]:
+    children = set(root for root, block in store.blocks.items() if block.parent_root == parent)
+    return children
+
+def get_orphans(store: spec.Store) -> Sequence[Tuple[str, int]]:
+    return tuple((str(root), int(block.slot))
+                 for root, block in store.blocks.items()
+                 if block.parent_root not in store.blocks)

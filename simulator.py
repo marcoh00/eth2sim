@@ -1,7 +1,7 @@
 import queue
 from dataclasses import dataclass
 from multiprocessing import Queue, JoinableQueue
-from typing import Optional, List, Sequence, Iterable
+from typing import Optional, List, Sequence, Iterable, Union
 
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
@@ -10,7 +10,7 @@ import eth2spec.phase0.spec as spec
 from beaconclient import BeaconClient
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
-    Event, MESSAGE_TYPE
+    Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent
 from helpers import queue_element_or_none
 from network import Network
 
@@ -96,7 +96,10 @@ class Simulator:
         encoded_state = genesis_state.encode_bytes()
         encoded_block = genesis_block.encode_bytes()
 
-        print(f'[SIMULATOR] Genesis state known. First block is {spec.hash_tree_root(genesis_block)}')
+        print(f'[SIMULATOR] Genesis state known.')
+        print('[SIMULATOR] state_root={} block_root={}'.format(
+            spec.hash_tree_root(genesis_state), spec.hash_tree_root(genesis_block)
+        ))
         print('[SIMULATOR] Start Validator processes')
         for client in self.clients:
             client.beacon_client.start()
@@ -124,7 +127,7 @@ class Simulator:
 
     def handle_next_slot_event(self, event: NextSlotEvent):
         if event.slot % spec.SLOTS_PER_EPOCH == 0:
-            print("---------- EPOCH BOUNDARY ----------")
+            print(f"---------- EPOCH {spec.compute_epoch_at_slot(spec.Slot(event.slot))} ----------")
         print(f"!!! SLOT {event.slot} !!!")
         self.slot += 1
         self.next_latest_vote_opportunity()
@@ -145,7 +148,7 @@ class Simulator:
         for validator in self.clients:
             validator.queue.put(event)
 
-    def __distribute_message_event(self, event: MessageEvent):
+    def __distribute_targeted_event(self, event: TargetedEvent):
         if event.toidx is None:
             raise ValueError('Event must have a receiver at this point')
         else:
@@ -180,7 +183,9 @@ class Simulator:
             NextSlotEvent: self.handle_next_slot_event,
             LatestVoteOpportunity: self.__distribute_event,
             AggregateOpportunity: self.__distribute_event,
-            MessageEvent: self.__distribute_message_event,
+            MessageEvent: self.__distribute_targeted_event,
+            ProduceStatisticsEvent: self.__distribute_targeted_event,
+            ProduceGraphEvent: self.__distribute_targeted_event,
             SimulationEndEvent: self.__distribute_end_event
         }
         recv_actions = {
@@ -199,15 +204,12 @@ class Simulator:
                     # noinspection PyTypeChecker
                     send_actions[type(event)](event)
                 if not self.should_quit:
-                    # print('WAIT FOR VALIDATORS TO FINISH TASKS')
                     for validator in self.clients:
                         validator.queue.join()
-                        # print(f"{validator.validator.counter} IS FINISHED")
                     recv_event = queue_element_or_none(self.queue)
                     while recv_event is not None:
                         # noinspection PyArgumentList
                         recv_actions[type(recv_event)](recv_event)
-                        # print(f"Current time: {self.simulator_time} / Event time: {recv_event.time} / Event: {type(recv_event).__name__}")
                         if recv_event.time < self.simulator_time:
                             print(f'[WARNING] Shall distribute event for the past! {recv_event}')
                         recv_event = queue_element_or_none(self.queue)
