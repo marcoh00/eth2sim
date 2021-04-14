@@ -58,8 +58,13 @@ def main():
         .validators(1)\
         .build()\
         .build()\
+        .beacon_client(1)\
+        .validators(16127)\
+        .build()\
+        .build()\
         .build()
-    simulator.generate_genesis()
+    simulator.read_genesis('mainnet')
+    simulator.initialize_clients()
     simulator.start_simulation()
 
 

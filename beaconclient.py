@@ -22,7 +22,7 @@ from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
-    ProduceStatisticsEvent, ProduceGraphEvent
+    ProduceStatisticsEvent, ProduceGraphEvent, ValidatorInitializationEvent
 from helpers import queue_element_or_none
 from validator import Validator
 
@@ -133,6 +133,7 @@ class BeaconClient(Process):
         self.current_time = event.time
         actions = {
             MessageEvent: self.__handle_message_event,
+            ValidatorInitializationEvent: self.__handle_validator_initialization,
             SimulationEndEvent: self.__handle_simulation_end,
             LatestVoteOpportunity: self.handle_latest_voting_opportunity,
             AggregateOpportunity: self.handle_aggregate_opportunity,
@@ -162,6 +163,15 @@ class BeaconClient(Process):
         # noinspection PyArgumentList
         actions[event.message_type](payload)
 
+    def __handle_validator_initialization(self, event: ValidatorInitializationEvent):
+        if event.empty_list:
+            self.validators = []
+            return
+        for counter in range(event.startidx, event.endidx + 1):
+            self.validators.append(Validator(
+                counter, spec.MAX_EFFECTIVE_BALANCE, event.keydir
+            ))
+
     def handle_statistics_event(self, event: ProduceStatisticsEvent):
         stats = statistics(self)
         pprint.pp(dataclasses.asdict(stats))
@@ -171,14 +181,17 @@ class BeaconClient(Process):
         self.graph(event.show)
 
     def handle_genesis_state(self, state: spec.BeaconState):
+        print(f'[BEACON CLIENT {self.counter}] Initialize state from Genesis State')
         self.state = state
         for validator in self.validators:
             validator.index_from_state(state)
 
     def handle_genesis_block(self, block: spec.BeaconBlock):
+        print(f'[BEACON CLIENT {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block')
         self.store = spec.get_forkchoice_store(self.state, block)
         self.block_cache = BlockCache(block)
         self.head_root = spec.hash_tree_root(block)
+        print(f'[BEACON CLIENT {self.counter}] Initialize committee cache for first epoch')
         self.update_committee(spec.Epoch(0))
 
     def __handle_simulation_end(self, event: SimulationEndEvent):

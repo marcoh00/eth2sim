@@ -24,6 +24,14 @@ class Event:
 
 
 @dataclass
+class ValidatorInitializationEvent(Event):
+    empty_list: bool
+    startidx: Optional[int]
+    endidx: Optional[int]
+    keydir: Optional[str]
+
+
+@dataclass
 class NextSlotEvent(Event):
     slot: int
 

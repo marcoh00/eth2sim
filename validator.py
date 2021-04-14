@@ -36,11 +36,19 @@ class Validator:
         return COLORS[idx % len(COLORS)]
 
     def index_from_state(self, state: spec.BeaconState):
-        self.index = spec.ValidatorIndex(max(
-            genesis_validator[0]
-            for genesis_validator in enumerate(state.validators)
-            if genesis_validator[1].pubkey == self.pubkey
-        ))
+        # Check whether counter matches
+        if len(state.validators) >= self.counter and state.validators[self.counter].pubkey == self.pubkey:
+            self.index = spec.ValidatorIndex(self.counter)
+        else:
+            self.index = self.__find_index(state)
+        if self.counter % 200 == 0:
+            print(f'[VALIDATOR {self.index}] Successfully obtained index. Counter was {self.counter}.')
+
+    def __find_index(self, state: spec.BeaconState) -> Optional[spec.ValidatorIndex]:
+        for index, validator in enumerate(state.validators):
+            if validator.pubkey == self.pubkey:
+                return spec.ValidatorIndex(index)
+        return None
 
     @staticmethod
     def __init_keys(counter: int, keydir: Optional[str]) -> Tuple[int, BLSPubkey]:
@@ -56,7 +64,8 @@ class Validator:
             pubkey_file = (keys / f'{counter}.pubkey')
             privkey_file = (keys / f'{counter}.privkey')
             if pubkey_file.is_file() and privkey_file.is_file():
-                print(f'[VALIDATOR# {counter}] Read keys from file')
+                if counter % 200 == 0:
+                    print(f'[VALIDATOR# {counter}] Read keys from file')
                 pubkey = pubkey_file.read_bytes()
                 privkey = int(privkey_file.read_text())
         if privkey is None or pubkey is None:

@@ -1,7 +1,8 @@
 import queue
 from dataclasses import dataclass
 from multiprocessing import Queue, JoinableQueue
-from typing import Optional, List, Sequence, Iterable, Union
+from pathlib import Path
+from typing import Optional, List, Sequence, Iterable, Union, Tuple
 
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
@@ -10,7 +11,7 @@ import eth2spec.phase0.spec as spec
 from beaconclient import BeaconClient
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
-    Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent
+    Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent, ValidatorInitializationEvent
 from helpers import queue_element_or_none
 from network import Network
 
@@ -24,6 +25,8 @@ class IndexedBeaconClient(object):
 class Simulator:
 
     genesis_time: uint64
+    genesis_state: Optional[spec.BeaconState]
+    genesis_block: Optional[spec.BeaconBlock]
     simulator_time: uint64
     slot: spec.Slot
     clients: List[IndexedBeaconClient]
@@ -70,7 +73,18 @@ class Simulator:
                  self.slot)
         )
 
-    def generate_genesis(self):
+    def read_genesis(self, filename=''):
+        print('[SIMULATOR] Read Genesis State and Block from file')
+        state_file = Path(f"state_{filename}.ssz")
+        block_file = Path(f"block_{filename}.ssz")
+        with open(state_file, 'rb') as fp:
+            encoded_state = fp.read()
+            self.genesis_state = spec.BeaconState.decode_bytes(encoded_state)
+        with open(block_file, 'rb') as fp:
+            encoded_block = fp.read()
+            self.genesis_block = spec.BeaconBlock.decode_bytes(encoded_block)
+
+    def generate_genesis(self, filename=None):
         deposit_data = []
         deposits = []
 
@@ -78,6 +92,7 @@ class Simulator:
         eth1_timestamp = spec.MIN_GENESIS_TIME
         for client in self.clients:
             for validator in client.beacon_client.validators:
+                print(f'[VALIDATOR {validator.counter}] Deposit {validator.startbalance} Gwei')
                 deposit, root, deposit_data = build_deposit(
                     spec=spec,
                     deposit_data_list=deposit_data,
@@ -89,20 +104,59 @@ class Simulator:
                 )
                 deposits.append(deposit)
 
-        genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
-        assert spec.is_valid_genesis_state(genesis_state)
-        genesis_block = spec.BeaconBlock(state_root=spec.hash_tree_root(genesis_state))
+        self.genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
+        assert spec.is_valid_genesis_state(self.genesis_state)
+        self.genesis_block = spec.BeaconBlock(state_root=spec.hash_tree_root(self.genesis_state))
+        print('[SIMULATOR] Genesis generation successful')
 
-        encoded_state = genesis_state.encode_bytes()
-        encoded_block = genesis_block.encode_bytes()
+        if filename is not None:
+            print('[SIMULATOR] Export Genesis State and Block to file')
+            state_file = f"state_{filename}.ssz"
+            block_file = f"block_{filename}.ssz"
+            with open(state_file, 'wb') as fp:
+                fp.write(self.genesis_state.encode_bytes())
+            with open(block_file, 'wb') as fp:
+                fp.write(self.genesis_block.encode_bytes())
 
-        print(f'[SIMULATOR] Genesis state known.')
+    @staticmethod
+    def __obtain_validator_range(client: BeaconClient) -> Union[Tuple[int, int], None]:
+        no_validators = len(client.validators)
+        if no_validators == 0:
+            return None
+        elif no_validators == 1:
+            return client.validators[0].counter, client.validators[0].counter
+        else:
+            return client.validators[0].counter, client.validators[-1].counter
+
+    def initialize_clients(self):
+        encoded_state = self.genesis_state.encode_bytes()
+        encoded_block = self.genesis_block.encode_bytes()
         print('[SIMULATOR] state_root={} block_root={}'.format(
-            spec.hash_tree_root(genesis_state), spec.hash_tree_root(genesis_block)
+            spec.hash_tree_root(self.genesis_state), spec.hash_tree_root(self.genesis_block)
         ))
         print('[SIMULATOR] Start Validator processes')
         for client in self.clients:
+            # Delete all validators inside the client and tell it to initialize them again
+            # This is a lot faster than serializing the existing validator objects and sending them
+            # over to the newly created process
+
+            # TODO somehow combine this with the builder. This wouldn't work for different keydirs for example.
+            # Different startbalances wouldn't be accessible either after this
+            # (although these are currently never accessed after genesis anymore)
+            client_validator_counters = self.__obtain_validator_range(client.beacon_client)
+            keydir = 'cryptokeys'
+            client.beacon_client.validators = []
+
             client.beacon_client.start()
+
+            print(f'[SIMULATOR] Beacon Client {client.beacon_client.counter} started')
+            client.queue.put(ValidatorInitializationEvent(
+                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                empty_list=client_validator_counters is None,
+                startidx=client_validator_counters[0] if client_validator_counters is not None else None,
+                endidx=client_validator_counters[1] if client_validator_counters is not None else None,
+                keydir=keydir
+            ))
             client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
                 message=encoded_state,
