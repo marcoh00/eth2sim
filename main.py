@@ -4,7 +4,7 @@ from datetime import datetime
 from importlib import reload
 import random
 
-from builder import SimulationBuilder
+from simulator import SimulationBuilder
 from eth2spec.config import config_util
 from eth2spec.phase0 import spec
 from pathvalidation import valid_writable_path
@@ -44,12 +44,12 @@ def main():
 
     simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
         .set_end_time(calc_simtime(0, 7, 0))\
-        .add_graph_output(3, calc_simtime(2, 2, 2), True)\
-        .add_statistics_output(3, calc_simtime(2, 2, 2))\
-        .add_graph_output(1, calc_simtime(5, 6, 2), True)\
-        .add_statistics_output(1, calc_simtime(5, 6, 2))\
-        .beacon_client(4)\
-        .validators(64)\
+        .add_graph_output(3, calc_simtime(1, 1, 2), False)\
+        .add_statistics_output(3, calc_simtime(9, 0, 2))\
+        .add_graph_output(5, calc_simtime(2, 2), False)\
+        .add_statistics_output(5, calc_simtime(3, 2, 2))\
+        .beacon_client(8)\
+        .validators(1032)\
         .build()\
         .build()\
         .beacon_client(1)\
@@ -59,7 +59,7 @@ def main():
         .build()\
         .build()\
         .beacon_client(1)\
-        .validators(16127)\
+        .validators(8127)\
         .build()\
         .build()\
         .build()

@@ -18,13 +18,14 @@ from remerkleable.bitfields import Bitlist
 from remerkleable.complex import Container
 
 import eth2spec.phase0.spec as spec
+from builder import Builder
 from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
     ProduceStatisticsEvent, ProduceGraphEvent, ValidatorInitializationEvent
 from helpers import queue_element_or_none
-from validator import Validator
+from validator import Validator, ValidatorBuilder
 
 
 class BeaconClient(Process):
@@ -58,13 +59,16 @@ class BeaconClient(Process):
                  client_to_simulator_queue: Queue,
                  configpath: str,
                  configname: str,
-                 validators=None,
+                 validator_builders: Sequence[ValidatorBuilder],
+                 validator_first_counter: int,
                  debug=False):
         super().__init__()
         self.counter = counter
         self.simulator_to_client_queue = simulator_to_client_queue
         self.client_to_simulator_queue = client_to_simulator_queue
-        self.validators = validators if validators is not None else list()
+        self.validator_builders = validator_builders
+        self.validator_first_counter = validator_first_counter
+        self.validators = []
         self.current_slot = spec.Slot(0)
         self.slot_last_attested = None
         self.committee = dict()
@@ -78,6 +82,7 @@ class BeaconClient(Process):
         self.debug = debug
         self.debugfile = None
         self.profile = False
+        self.build_validators()
 
     def __debug(self, obj, typ: str):
         if not self.debug:
@@ -164,18 +169,15 @@ class BeaconClient(Process):
         actions[event.message_type](payload)
 
     def __handle_validator_initialization(self, event: ValidatorInitializationEvent):
-        if event.empty_list:
-            self.validators = []
-            return
-        for counter in range(event.startidx, event.endidx + 1):
-            self.validators.append(Validator(
-                counter, spec.MAX_EFFECTIVE_BALANCE, event.keydir
-            ))
+        self.build_validators()
 
     def handle_statistics_event(self, event: ProduceStatisticsEvent):
         stats = statistics(self)
-        pprint.pp(dataclasses.asdict(stats))
+        asdict = dataclasses.asdict(stats)
+        pprint.pp(asdict)
         self.__debug(str(stats), 'Statistics')
+        with open(f'stats_{self.counter}_{int(time())}', 'a') as fp:
+            pprint.pp(asdict, fp)
 
     def produce_graph_event(self, event: ProduceGraphEvent):
         self.graph(event.show)
@@ -620,6 +622,13 @@ class BeaconClient(Process):
         if show:
             g.view()
 
+    def build_validators(self):
+        self.validators = list()
+        for builder in self.validator_builders:
+            for _ in range(0, builder.validators_count):
+                self.validators.append(builder.build(False, self.validator_first_counter + len(self.validators)))
+
+
 # Statistics
 
 @dataclass
@@ -658,9 +667,9 @@ def statistics(client: BeaconClient) -> Statistics:
         justified=(str(client.store.justified_checkpoint.root),
                    int(client.store.blocks[client.store.justified_checkpoint.root].slot),
                    int(client.store.justified_checkpoint.epoch)),
-        head_balance=spec.get_latest_attesting_balance(client.store, client.head_root) // spec.ETH_TO_GWEI,
-        finalized_balance=spec.get_latest_attesting_balance(client.store, client.store.finalized_checkpoint.root) // spec.ETH_TO_GWEI,
-        justified_balance=spec.get_latest_attesting_balance(client.store, client.store.justified_checkpoint.root) // spec.ETH_TO_GWEI,
+        head_balance=spec.get_latest_attesting_balance(client.store, client.head_root),
+        finalized_balance=spec.get_latest_attesting_balance(client.store, client.store.finalized_checkpoint.root),
+        justified_balance=spec.get_latest_attesting_balance(client.store, client.store.justified_checkpoint.root),
         leafs=tuple(str(root) for root in get_leaf_blocks(client.store, None)),
         leafs_since_justification=tuple(str(root) for root in get_leaf_blocks(client.store,
                                                                               client.store.justified_checkpoint.root)),
@@ -673,9 +682,10 @@ def statistics(client: BeaconClient) -> Statistics:
         validators_left=tuple((spec.ValidatorIndex(v[0]), v[1].exit_epoch)
                               for v in enumerate(client.state.validators)
                               if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH),
-        balances={v[0]: v[1].effective_balance // spec.ETH_TO_GWEI
+        balances={v[0]: v[1].effective_balance
                   for v in enumerate(client.state.validators)}
     )
+
 
 def get_leaf_blocks(store: spec.Store, forced_parent: Optional[spec.Root]) -> Set[spec.Root]:
     blocks = set(store.blocks.keys())
@@ -686,6 +696,7 @@ def get_leaf_blocks(store: spec.Store, forced_parent: Optional[spec.Root]) -> Se
     for blockroot in blocks:
         has_children.add(store.blocks[blockroot].parent_root)
     return blocks.difference(has_children)
+
 
 def get_chain_blocks(store: spec.Store, base_block: spec.Root) -> Set[spec.Root]:
     chain = set()
@@ -698,11 +709,79 @@ def get_chain_blocks(store: spec.Store, base_block: spec.Root) -> Set[spec.Root]
         children = new_children
     return chain
 
+
 def get_children(store: spec.Store, parent: spec.Root) -> Set[spec.Root]:
     children = set(root for root, block in store.blocks.items() if block.parent_root == parent)
     return children
+
 
 def get_orphans(store: spec.Store) -> Sequence[Tuple[str, int]]:
     return tuple((str(root), int(block.slot))
                  for root, block in store.blocks.items()
                  if block.parent_root not in store.blocks)
+
+
+class BeaconClientBuilder(Builder):
+    configpath: str
+    configname: str
+
+    debug: bool
+    debugfile: Optional[str]
+    profile: bool
+
+    validators_count: int
+    validator_builders: List[ValidatorBuilder]
+
+    neccessary_info_set: bool
+    validator_start_at: int
+    recv_queue: JoinableQueue
+    send_queue: Queue
+
+    def __init__(self, configpath, configname, parent_builder=None,):
+        super(BeaconClientBuilder, self).__init__(parent_builder)
+        self.validator_builders = []
+        self.configpath = configpath
+        self.configname = configname
+        self.debug = False
+        self.debugfile = None
+        self.profile = False
+
+        self.neccessary_info_set = False
+        self.validator_start_at = 0
+        self.simulator_to_client_queue = JoinableQueue()
+        self.client_to_simulator_queue = Queue()
+
+    def build_impl(self, counter):
+        if not self.neccessary_info_set:
+            raise ValueError('Need to specify queues and validator start index')
+        return BeaconClient(
+            counter=counter,
+            simulator_to_client_queue=self.simulator_to_client_queue,
+            client_to_simulator_queue=self.client_to_simulator_queue,
+            configpath=self.configpath,
+            configname=self.configname,
+            validator_builders=self.validator_builders,
+            validator_first_counter=self.validator_start_at,
+            debug=self.debug
+        )
+
+    def register(self, child_builder: ValidatorBuilder):
+        child_builder.validators_count = int(self.validators_count)
+        self.validator_builders.append(child_builder)
+
+    def set_debug(self, flag=False):
+        self.debug = flag
+        return self
+
+    def set_profile(self, flag=False):
+        self.profile = flag
+        return self
+
+    def validators(self, count):
+        self.validators_count = count
+        return ValidatorBuilder(parent_builder=self)
+
+    def neccessary_information(self, validator_start_at, client_to_simulator_queue):
+        self.neccessary_info_set = True
+        self.validator_start_at = validator_start_at
+        self.client_to_simulator_queue = client_to_simulator_queue

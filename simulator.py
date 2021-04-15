@@ -1,3 +1,4 @@
+import datetime
 import queue
 from dataclasses import dataclass
 from multiprocessing import Queue, JoinableQueue
@@ -8,7 +9,9 @@ from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 import eth2spec.phase0.spec as spec
-from beaconclient import BeaconClient
+from beaconclient import BeaconClient, BeaconClientBuilder
+from builder import Builder
+from eth2spec.phase0 import spec
 from eth2spec.test.helpers.deposits import build_deposit
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
     Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent, ValidatorInitializationEvent
@@ -143,19 +146,15 @@ class Simulator:
             # TODO somehow combine this with the builder. This wouldn't work for different keydirs for example.
             # Different startbalances wouldn't be accessible either after this
             # (although these are currently never accessed after genesis anymore)
-            client_validator_counters = self.__obtain_validator_range(client.beacon_client)
-            keydir = 'cryptokeys'
+            #client_validator_counters = self.__obtain_validator_range(client.beacon_client)
+            #keydir = 'cryptokeys'
             client.beacon_client.validators = []
 
             client.beacon_client.start()
 
             print(f'[SIMULATOR] Beacon Client {client.beacon_client.counter} started')
             client.queue.put(ValidatorInitializationEvent(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
-                empty_list=client_validator_counters is None,
-                startidx=client_validator_counters[0] if client_validator_counters is not None else None,
-                endidx=client_validator_counters[1] if client_validator_counters is not None else None,
-                keydir=keydir
+                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY)
             ))
             client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
@@ -247,10 +246,14 @@ class Simulator:
             SimulationEndEvent: self.__recv_end_event
         }
 
+        start_time = datetime.datetime.now()
+        print(f"[{simtime(start_time)}] Start Simulation")
+
         while not self.should_quit:
             top = self.events.get()
             self.simulator_time = top.time
-            print(f'Current time: {self.simulator_time}')
+            print(f'[{simtime(start_time)}] Current time: {self.simulator_time} '
+                  f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
             current_time_events = list(self.__collect_events_upto_current_time())
             current_time_events.append(top)
             while len(current_time_events) >= 1:
@@ -265,7 +268,7 @@ class Simulator:
                         # noinspection PyArgumentList
                         recv_actions[type(recv_event)](recv_event)
                         if recv_event.time < self.simulator_time:
-                            print(f'[WARNING] Shall distribute event for the past! {recv_event}')
+                            print(f'[{simtime(start_time)}][WARNING] Shall distribute event for the past! {recv_event}')
                         recv_event = queue_element_or_none(self.queue)
                 current_time_events = tuple(self.__collect_events_upto_current_time())
 
@@ -296,3 +299,87 @@ class Simulator:
         else:
             for validator in self.clients:
                 self.network.send(fromidx, spec.ValidatorIndex(validator.index), message)
+
+
+def sec_to_time(seconds: int) -> str:
+    minutes = seconds // 60
+    hours = minutes // 60
+
+    seconds -= minutes * 60
+    minutes -= hours * 60
+    return f"{hours:02d}h{minutes:02d}m{seconds:02d}s"
+
+
+def simtime(start_time: datetime.datetime) -> str:
+    delta = datetime.datetime.now() - start_time
+    return sec_to_time(delta.seconds)
+
+
+class SimulationBuilder(Builder):
+    configpath: str
+    configname: str
+    rand: ByteVector
+    current_child_count: int
+    end_time: uint64
+    statproducers: List[Tuple[int, int]]
+    graphproducers: List[Tuple[int, int, bool]]
+
+    beacon_client_builders: List[BeaconClientBuilder]
+
+    def __init__(self, configpath, configname, rand, parent_builder=None):
+        super(SimulationBuilder, self).__init__(parent_builder)
+        self.beacon_client_builders = []
+        self.configpath = configpath
+        self.configname = configname
+        self.rand = rand
+        self.end_time = uint64((8 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)
+        self.statproducers = []
+        self.graphproducers = []
+
+    def beacon_client(self, count):
+        self.current_child_count = count
+        return BeaconClientBuilder(self.configpath, self.configname, parent_builder=self)
+
+    def build_impl(self, counter):
+        client_to_simulator_queue = Queue()
+        # Build client set
+        client_counter = 0
+        validator_counter = 0
+        clients = list()
+        for client_builder in self.beacon_client_builders:
+            simulator_to_client_queue = JoinableQueue()
+            client_builder.neccessary_information(validator_counter, client_to_simulator_queue)
+            client = client_builder.build(callback=False, counter=client_counter)
+            indexed_client = IndexedBeaconClient(
+                queue=simulator_to_client_queue,
+                beacon_client=client
+            )
+            indexed_client.beacon_client.simulator_to_client_queue = simulator_to_client_queue
+            clients.append(indexed_client)
+            client_counter += 1
+            validator_counter += len(indexed_client.beacon_client.validators)
+        simulator = Simulator(self.rand)
+        simulator.queue = client_to_simulator_queue
+        simulator.clients = clients
+        simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time))
+        for client, time in self.statproducers:
+            simulator.events.put(ProduceStatisticsEvent(simulator.genesis_time + time, client))
+        for client, time, show in self.graphproducers:
+            simulator.events.put(ProduceGraphEvent(simulator.genesis_time + time, client, show))
+        return simulator
+
+    def set_end_time(self, end_time):
+        self.end_time = end_time
+        return self
+
+    def add_statistics_output(self, client, time):
+        self.statproducers.append((client, time))
+        return self
+
+    def add_graph_output(self, client, time, show):
+        self.graphproducers.append((client, time, show))
+        return self
+
+    def register(self, child_builder):
+        for _ in range(self.current_child_count):
+            self.beacon_client_builders.append(child_builder)

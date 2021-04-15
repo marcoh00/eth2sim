@@ -4,6 +4,7 @@ from typing import Optional, Tuple
 
 from remerkleable.basic import uint64
 
+from builder import Builder
 from colors import COLORS
 from eth2spec.phase0 import spec
 from eth2spec.phase0.spec import BLSPubkey
@@ -41,8 +42,6 @@ class Validator:
             self.index = spec.ValidatorIndex(self.counter)
         else:
             self.index = self.__find_index(state)
-        if self.counter % 200 == 0:
-            print(f'[VALIDATOR {self.index}] Successfully obtained index. Counter was {self.counter}.')
 
     def __find_index(self, state: spec.BeaconState) -> Optional[spec.ValidatorIndex]:
         for index, validator in enumerate(state.validators):
@@ -77,3 +76,29 @@ class Validator:
                 pubkey_file.write_bytes(pubkey)
                 privkey_file.write_text(str(privkey))
         return privkey, pubkey
+
+
+class ValidatorBuilder(Builder):
+    keydir: Optional[str]
+    validators_count: Optional[int]
+
+    def __init__(self, parent_builder=None):
+        super().__init__(parent_builder)
+        self.keydir = "cryptokeys"
+        self.startbalance = spec.MAX_EFFECTIVE_BALANCE
+
+    def build_impl(self, counter):
+        return Validator(
+            counter=counter,
+            startbalance=self.startbalance,
+            keydir=self.keydir
+        )
+
+    def register(self, child_builder):
+        pass
+
+    def set_keydir(self, keydir):
+        self.keydir = keydir
+
+    def set_startbalance(self, balance):
+        self.startbalance = balance
