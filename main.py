@@ -1,5 +1,6 @@
 import argparse
 import multiprocessing
+import sys
 from datetime import datetime
 from importlib import reload
 import random
@@ -42,38 +43,52 @@ def main():
     print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
 
+    # simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
+    #     .set_end_time(calc_simtime(3, 2, 4))\
+    #     .add_graph_output(3, calc_simtime(1, 1, 2), False)\
+    #     .add_statistics_output(3, calc_simtime(9, 0, 2))\
+    #     .add_graph_output(5, calc_simtime(2, 2), False)\
+    #     .add_statistics_output(5, calc_simtime(3, 2, 2))\
+    #     .beacon_client(8)\
+    #     .validators(1032)\
+    #     .build()\
+    #     .build()\
+    #     .beacon_client(1)\
+    #     .set_debug(True)\
+    #     .set_profile(True)\
+    #     .validators(1)\
+    #     .build()\
+    #     .build()\
+    #     .beacon_client(1)\
+    #     .validators(8127)\
+    #     .build()\
+    #     .build()\
+    #     .build()
+    # simulator.read_genesis('mainnet')
+    # simulator.initialize_clients()
+    # simulator.start_simulation()
+
     simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
-        .set_end_time(calc_simtime(0, 7, 0))\
-        .add_graph_output(3, calc_simtime(1, 1, 2), False)\
-        .add_statistics_output(3, calc_simtime(9, 0, 2))\
-        .add_graph_output(5, calc_simtime(2, 2), False)\
-        .add_statistics_output(5, calc_simtime(3, 2, 2))\
+        .set_end_time(calc_simtime(2, 6, 2))\
+        .add_graph_output(1, calc_simtime(1, 3, 1), show=True)\
+        .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
+        .add_statistics_output(1, calc_simtime(1, 3, 1)) \
+        .add_statistics_output(0, calc_simtime(2, 6, 1)) \
         .beacon_client(8)\
-        .validators(1032)\
-        .build()\
-        .build()\
-        .beacon_client(1)\
-        .set_debug(True)\
-        .set_profile(True)\
-        .validators(1)\
-        .build()\
-        .build()\
-        .beacon_client(1)\
-        .validators(8127)\
+        .validators(32)\
         .build()\
         .build()\
         .build()
-    simulator.read_genesis('mainnet')
+    simulator.generate_genesis()
     simulator.initialize_clients()
     simulator.start_simulation()
 
 
 if __name__ == '__main__':
-    start = datetime.now()
     try:
-        multiprocessing.set_start_method("spawn")
+        # multiprocessing.set_start_method("spawn")
         main()
-        end = datetime.now()
+        sys.exit(0)
     except KeyboardInterrupt:
         end = datetime.now()
-    print(f"{end-start}")
+        sys.exit(0)
