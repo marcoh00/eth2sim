@@ -7,20 +7,23 @@ from eth2spec.phase0 import spec
 
 
 MESSAGE_TYPE = Union[spec.Attestation, spec.SignedAggregateAndProof, spec.SignedBeaconBlock]
-GLOBAL_COUNTER = [uint64(0), ]
 
+"""
+For keeping determinism, every Event has gained a field `priority`.
+Certain messages do need to have certain priorities:
 
+Messages which directly lead to the creation of other messages do need to have a higher priority than
+those who don't:
+
+NextSlot/AttestationOpportunity/AggregationOpportunity > Block > Attestation/AggregatedAttestation
+"""
 @dataclass
 class Event:
     time: uint64
-    counter: uint64 = field(init=False)
-
-    def __post_init__(self):
-        GLOBAL_COUNTER[0] = GLOBAL_COUNTER[0] + 1
-        self.counter = GLOBAL_COUNTER[0].copy()
+    priority: int
 
     def __lt__(self, other):
-        return self.counter < other.counter if self.time == other.time else self.time < other.time
+        return self.priority < other.priority if self.time == other.time else self.time < other.time
 
 
 @dataclass

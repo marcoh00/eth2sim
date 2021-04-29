@@ -6,7 +6,7 @@ import traceback
 from importlib import reload
 from multiprocessing import Queue, JoinableQueue
 from multiprocessing.context import Process
-from time import time
+import time
 from typing import Tuple, Optional, List, Dict, Sequence, Set
 
 from dataclasses import dataclass
@@ -88,7 +88,7 @@ class BeaconClient(Process):
         if not self.debug:
             return
         if not self.debugfile:
-            self.debugfile = open(f'log_{self.counter}_{int(time())}.json', 'w')
+            self.debugfile = open(f'log_{self.counter}_{int(time.time())}.json', 'w')
         if isinstance(obj, Container):
             logobj = str(obj)
         elif isinstance(obj, dict):
@@ -123,10 +123,11 @@ class BeaconClient(Process):
             self.simulator_to_client_queue.task_done()
         if self.profile:
             pr.disable()
-            pr.dump_stats(f"profile_{self.counter}_{time()}.prof")
+            pr.dump_stats(f"profile_{self.counter}_{time.time()}.prof")
         if self.debug:
             print(f'[BEACON CLIENT {self.counter}] Write Log file')
             self.debugfile.close()
+        print(f"[BEACON CLIENT {self.counter}] Terminate process")
 
     def __handle_event(self, event: Event):
         if event.time < self.current_time:
@@ -176,7 +177,7 @@ class BeaconClient(Process):
         asdict = dataclasses.asdict(stats)
         pprint.pp(asdict)
         self.__debug(str(stats), 'Statistics')
-        with open(f'stats_{self.counter}_{int(time())}', 'a') as fp:
+        with open(f'stats_{self.counter}_{int(time.time())}', 'a') as fp:
             pprint.pp(asdict, fp)
 
     def produce_graph_event(self, event: ProduceGraphEvent):
@@ -198,6 +199,8 @@ class BeaconClient(Process):
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
         self.__debug(event, 'SimulationEnd')
+        print(f'[BEACON CLIENT {self.counter}] Received SimulationEndEvent')
+        time.sleep(3)
         # Mark all remaining tasks as done
         next_task = queue_element_or_none(self.simulator_to_client_queue)
         while next_task is not None:
@@ -206,7 +209,6 @@ class BeaconClient(Process):
         self.should_quit = True
         if self.debug:
             self.graph(show=True)
-        print(f'Goodbye from {self.counter}!')
 
     def update_committee(self, epoch: spec.Epoch):
         start_slot = spec.compute_start_slot_at_epoch(epoch)
@@ -293,7 +295,7 @@ class BeaconClient(Process):
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
             self.__debug(text, 'FindNewStateRootError')
-            self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time))
+            self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=0))
             return
         block.state_root = new_state_root
         signed_block = spec.SignedBeaconBlock(
@@ -304,6 +306,7 @@ class BeaconClient(Process):
 
         self.client_to_simulator_queue.put(MessageEvent(
             time=self.current_time,
+            priority=20,
             message=encoded_signed_block,
             message_type='SignedBeaconBlock',
             fromidx=self.counter,
@@ -411,6 +414,7 @@ class BeaconClient(Process):
             encoded_aggregate_and_proof = signed_aggregate_and_proof.encode_bytes()
             self.client_to_simulator_queue.put(MessageEvent(
                 time=self.current_time,
+                priority=30,
                 message=encoded_aggregate_and_proof,
                 message_type='SignedAggregateAndProof',
                 fromidx=self.counter,
@@ -533,6 +537,7 @@ class BeaconClient(Process):
             encoded_attestation = attestation.encode_bytes()
             message = MessageEvent(
                 time=self.current_time,
+                priority=30,
                 message=encoded_attestation,
                 message_type='Attestation',
                 fromidx=self.counter,
@@ -568,7 +573,7 @@ class BeaconClient(Process):
         return COLORS[validator % len(COLORS)]
 
     def graph(self, show=True):
-        g = Digraph('G', filename=f'graph_{int(time())}_{self.counter}.gv')
+        g = Digraph('G', filename=f'graph_{int(time.time())}_{self.counter}.gv')
         blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
         for root, block in self.store.blocks.items():
             epoch = spec.compute_epoch_at_slot(block.slot)

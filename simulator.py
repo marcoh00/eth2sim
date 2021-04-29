@@ -31,6 +31,7 @@ class Simulator:
     genesis_state: Optional[spec.BeaconState]
     genesis_block: Optional[spec.BeaconBlock]
     simulator_time: uint64
+    simulator_prio: int
     slot: spec.Slot
     clients: List[IndexedBeaconClient]
     network: Network
@@ -43,6 +44,7 @@ class Simulator:
     def __init__(self, rand: ByteVector):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
+        self.simulator_prio = 2**64 - 1
         self.slot = spec.Slot(0)
         self.clients = []
         self.network = Network(self, int.from_bytes(rand[0:4], "little"))
@@ -59,6 +61,7 @@ class Simulator:
         self.events.put(
             NextSlotEvent(
                 self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + spec.SECONDS_PER_SLOT,
+                0,
                 self.slot + 1)
         )
 
@@ -66,6 +69,7 @@ class Simulator:
         self.events.put(
              LatestVoteOpportunity(
                  self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + (spec.SECONDS_PER_SLOT // 3),
+                 0,
                  self.slot)
         )
 
@@ -73,6 +77,7 @@ class Simulator:
         self.events.put(
              AggregateOpportunity(
                  self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + (2 * (spec.SECONDS_PER_SLOT // 3)),
+                 0,
                  self.slot)
         )
 
@@ -95,7 +100,6 @@ class Simulator:
         eth1_timestamp = spec.MIN_GENESIS_TIME
         for client in self.clients:
             for validator in client.beacon_client.validators:
-                print(f'[VALIDATOR {validator.counter}] Deposit {validator.startbalance} Gwei')
                 deposit, root, deposit_data = build_deposit(
                     spec=spec,
                     deposit_data_list=deposit_data,
@@ -142,22 +146,17 @@ class Simulator:
             # Delete all validators inside the client and tell it to initialize them again
             # This is a lot faster than serializing the existing validator objects and sending them
             # over to the newly created process
-
-            # TODO somehow combine this with the builder. This wouldn't work for different keydirs for example.
-            # Different startbalances wouldn't be accessible either after this
-            # (although these are currently never accessed after genesis anymore)
-            #client_validator_counters = self.__obtain_validator_range(client.beacon_client)
-            #keydir = 'cryptokeys'
             client.beacon_client.validators = []
-
             client.beacon_client.start()
 
             print(f'[SIMULATOR] Beacon Client {client.beacon_client.counter} started')
             client.queue.put(ValidatorInitializationEvent(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY)
+                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                priority=0
             ))
             client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                priority=10,
                 message=encoded_state,
                 message_type='BeaconState',
                 fromidx=0,
@@ -165,6 +164,7 @@ class Simulator:
             ))
             client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                priority=20,
                 message=encoded_block,
                 message_type='BeaconBlock',
                 fromidx=0,
@@ -215,6 +215,7 @@ class Simulator:
             for index in range(len(self.clients)):
                 event_with_receiver = MessageEvent(
                     time=event.time,
+                    priority=event.priority,
                     message=event.message,
                     message_type=event.message_type,
                     fromidx=event.fromidx,
@@ -252,12 +253,13 @@ class Simulator:
         while not self.should_quit:
             top = self.events.get()
             self.simulator_time = top.time
+            self.simulator_prio = top.priority
             print(f'[{simtime(start_time)}] Current time: {self.simulator_time} '
                   f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
-            current_time_events = list(self.__collect_events_upto_current_time())
-            current_time_events.append(top)
-            while len(current_time_events) >= 1:
-                for event in current_time_events:
+            current_time_and_prio_events = list(self.__collect_events_upto_current_time_and_prio())
+            current_time_and_prio_events.append(top)
+            while len(current_time_and_prio_events) >= 1:
+                for event in current_time_and_prio_events:
                     # noinspection PyTypeChecker
                     send_actions[type(event)](event)
                 if not self.should_quit:
@@ -270,12 +272,20 @@ class Simulator:
                         if recv_event.time < self.simulator_time:
                             print(f'[{simtime(start_time)}][WARNING] Shall distribute event for the past! {recv_event}')
                         recv_event = queue_element_or_none(self.queue)
-                current_time_events = tuple(self.__collect_events_upto_current_time())
+                current_time_and_prio_events = tuple(self.__collect_events_upto_current_time_and_prio())
+        print(f'[{simtime(start_time)}] [SIMULATOR] FINISH SIMULATION AT TIMESTAMP {self.simulator_time} '
+              f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
 
-    def __collect_events_upto_current_time(self, progress_time=False) -> Iterable[Event]:
-        element = queue_element_or_none(self.events)
+    def __collect_events_upto_current_time_and_prio(self, progress_time=False) -> Iterable[Event]:
+        element: Optional[Event] = queue_element_or_none(self.events)
         while element is not None:
-            if element.time == self.simulator_time:
+            if element.time == self.simulator_time and element.priority == self.simulator_prio:
+                yield element
+            elif element.time == self.simulator_time and element.priority < self.simulator_prio:
+                print(f"[WARNING] Priority downgrade ({self.simulator_prio} -> {element.priority})")
+                print(f'Current: {element}')
+                print(f'Previous: {self.element_cache}')
+                self.simulator_prio = element.priority
                 yield element
             elif element.time < self.simulator_time:
                 print(f'[WARNING] element.time is before simulator_time! {str(element)}')
@@ -286,19 +296,10 @@ class Simulator:
                 self.events.put(element)
                 if progress_time:
                     self.simulator_time = element.time
+                    self.simulator_prio = element.priority
                 return
+            self.element_cache = element
             element = queue_element_or_none(self.events)
-
-    def __handle_validator_message_event(self,
-                                         fromidx: spec.ValidatorIndex,
-                                         toidx: Optional[Sequence[spec.ValidatorIndex]],
-                                         message: MESSAGE_TYPE):
-        if toidx:
-            for validatoridx in toidx:
-                self.network.send(fromidx, validatoridx, message)
-        else:
-            for validator in self.clients:
-                self.network.send(fromidx, spec.ValidatorIndex(validator.index), message)
 
 
 def sec_to_time(seconds: int) -> str:
@@ -361,11 +362,11 @@ class SimulationBuilder(Builder):
         simulator = Simulator(self.rand)
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
-        simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time))
+        simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time, 0))
         for client, time in self.statproducers:
-            simulator.events.put(ProduceStatisticsEvent(simulator.genesis_time + time, client))
+            simulator.events.put(ProduceStatisticsEvent(simulator.genesis_time + time, 100, client))
         for client, time, show in self.graphproducers:
-            simulator.events.put(ProduceGraphEvent(simulator.genesis_time + time, client, show))
+            simulator.events.put(ProduceGraphEvent(simulator.genesis_time + time, 100, client, show))
         return simulator
 
     def set_end_time(self, end_time):
