@@ -1,29 +1,32 @@
-import numpy as np
-
 from remerkleable.basic import uint64
 
-from eth2spec.phase0 import spec
+import hashlib
 from events import MessageEvent, MESSAGE_TYPE
 
 USE_RANDOM_LATENCY = True
+LATENCY_MAP_GT = ((0, 1), (200, 2), (230, 3), (245, 4), (250, 5), (253, 8))
 
 
 class Network(object):
     def __init__(self, simulator, rand):
         self.simulator = simulator
-        self.random = np.random.RandomState(seed=rand)
-
-    def __latency(self) -> uint64:
-        random_latency = uint64(int(max(0, self.random.normal(2, 3))))
-        return random_latency if USE_RANDOM_LATENCY else uint64(0)
+        self.random = rand
+        #self.random = np.random.RandomState(seed=rand)
 
     # noinspection PyUnusedLocal
-    def latency(self, fromidx: spec.ValidatorIndex, toidx: spec.ValidatorIndex):
-        return self.__latency()
-
-    def send(self, fromidx: spec.ValidatorIndex, toidx: spec.ValidatorIndex, message: MESSAGE_TYPE):
-        time = self.simulator.simulator_time + self.latency(fromidx, toidx)
-        self.simulator.events.put(MessageEvent(time, message, fromidx, toidx))
+    def latency(self, time: uint64, fromidx: int, toidx: int):
+        hashgen = hashlib.sha256(usedforsecurity=False)
+        hashgen.update(f"{str(self.random)}-{str(time)}-{str(fromidx)}-{str(toidx)}".encode('utf-8'))
+        # 1 byte = 0-255
+        rndvalue = int(hashgen.digest()[0])
+        latency = 0
+        for maptuple in LATENCY_MAP_GT:
+            if rndvalue > maptuple[0]:
+                latency = maptuple[1]
+        if fromidx == toidx:
+            latency = 0
+        # print(f'LATENCY [{time},{fromidx},{toidx}] {latency}')
+        return latency
 
     def delay(self, message: MessageEvent):
-        message.time = message.time + self.latency(message.fromidx, message.toidx)
+        message.time = message.time + self.latency(message.time, message.fromidx, message.toidx)
