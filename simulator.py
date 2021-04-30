@@ -263,8 +263,8 @@ class Simulator:
                     # noinspection PyTypeChecker
                     send_actions[type(event)](event)
                 if not self.should_quit:
-                    for validator in self.clients:
-                        validator.queue.join()
+                    for client in self.clients:
+                        client.queue.join()
                     recv_event = queue_element_or_none(self.queue)
                     while recv_event is not None:
                         # noinspection PyArgumentList

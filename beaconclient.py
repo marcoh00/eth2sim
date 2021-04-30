@@ -223,15 +223,16 @@ class BeaconClient(Process):
                     self.committee[slot][validator_index[1]] = (committee_index, validator_index[0], len(committee))
 
     def propose_block(self, validator: Validator, head_state: spec.BeaconState, slashme=False):
+        min_slot_to_include = spec.compute_start_slot_at_epoch(
+            spec.compute_epoch_at_slot(self.current_slot)
+        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
+        max_slot_to_include = self.current_slot - 1
+
         # If the attestation's target epoch is the current epoch,
         # the source checkpoint must match with the proposer's
         #
         # ep(target) == ep(now) => cp_justified == cp_source
         # <=> ep(target) != ep(now) v cp_justified == cp_source
-        min_slot_to_include = spec.compute_start_slot_at_epoch(
-            spec.compute_epoch_at_slot(self.current_slot)
-        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
-        max_slot_to_include = self.current_slot - 1
         candidate_attestations = tuple(
             attestation
             for attestation in self.attestation_cache.attestations_not_seen_in_block(
@@ -248,8 +249,12 @@ class BeaconClient(Process):
             state_root=spec.Bytes32(bytes(0 for _ in range(0, 32)))
         )
         randao_reveal = spec.get_epoch_signature(head_state, block, validator.privkey)
+
+        # Copy eth1_data from previous block as we do not connect
+        # to a (simulated) eth1 chain to process new deposits
         eth1_data = head_state.eth1_data
 
+        # Include slashable blocks and attestations if the corresponding validators are deemed slashable
         proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list(
             slashing for slashing in self.block_cache.search_slashings()
             if spec.is_slashable_validator(
@@ -259,20 +264,25 @@ class BeaconClient(Process):
         )
         attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
             slashing for slashing in self.attestation_cache.search_slashings()
-            if all(
+            if any(
                 spec.is_slashable_validator(head_state.validators[vindex], spec.get_current_epoch(head_state))
                 for vindex in set(slashing.attestation_1.attesting_indices)
                     .intersection(set(slashing.attestation_2.attesting_indices)))
         )
+
+        # Truncate the lists if they contain more elements than allowed by spec
         if len(proposer_slashings) > spec.MAX_PROPOSER_SLASHINGS:
             proposer_slashings = proposer_slashings[0:spec.MAX_PROPOSER_SLASHINGS]
         if len(attester_slashings) > spec.MAX_ATTESTER_SLASHINGS:
             attester_slashings = attester_slashings[0:spec.MAX_ATTESTER_SLASHINGS]
         if len(candidate_attestations) > spec.MAX_ATTESTATIONS:
             candidate_attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
+
+        # Provoke slashing by forming an alternative block which doesn't contain the last 2 attestations
         if slashme:
             candidate_attestations = candidate_attestations[0:len(candidate_attestations) - 2]
 
+        # We do not support deposits and voluntary exists
         deposits: List[spec.Deposit, spec.MAX_DEPOSITS] = list()
         voluntary_exits: List[spec.VoluntaryExit, spec.MAX_VOLUNTARY_EXITS] = list()
 
@@ -499,15 +509,24 @@ class BeaconClient(Process):
         head_block = self.store.blocks[self.head_root]
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:
+            # If the current head state's slot is lower than the current slot by time,
+            # advance the state to the current slot.
+            # Internally, the last seen block is copied and used as the block for every slot
+            # up until the current slot.
             spec.process_slots(head_state, self.current_slot)
 
-        # From validator spec / Attesting / Note
+        # As specified inside validator.md spec / Attesting / Note:
         start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
         epoch_boundary_block_root = spec.hash_tree_root(head_block) \
             if start_slot == head_state.slot \
             else spec.get_block_root(head_state, spec.get_current_epoch(head_state))
 
+        # Create Attestation for every managed Validator who is supposed to attest
         for (validator_index, validator) in attesting_validators.items():
+            # validator_committee:
+            # 0: CommiteeIndex of the validator's committee
+            # 1: Index of the validator inside the committee
+            # 2: Size of the committee
             validator_committee = self.committee[self.current_slot][validator_index][0]
             attestation_data = spec.AttestationData(
                 slot=self.current_slot,
