@@ -77,9 +77,15 @@ def main():
         .beacon_client(8)\
         .validators(32)\
         .build()\
-        .build()\
+        .build() \
+        .beacon_client(1) \
+        .set_profile(True) \
+        .set_debug(True) \
+        .validators(16) \
+        .build() \
+        .build() \
         .build()
-    simulator.generate_genesis()
+    simulator.generate_genesis(filename='simple_simulation')
     simulator.initialize_clients()
     simulator.start_simulation()
 
