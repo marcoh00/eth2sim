@@ -67,6 +67,7 @@ class MessageEvent(Event):
     message_type: str
     fromidx: int
     toidx: Optional[int]
+    custom_latency: Optional[int] = field(default=None)
 
 
 @dataclass

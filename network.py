@@ -1,3 +1,5 @@
+from typing import Tuple, Optional
+
 from remerkleable.basic import uint64
 
 import hashlib
@@ -8,10 +10,10 @@ LATENCY_MAP_GT = ((0, 1), (200, 2), (230, 3), (245, 4), (250, 5), (253, 8))
 
 
 class Network(object):
-    def __init__(self, simulator, rand):
+    def __init__(self, simulator, rand, custom_latency_map: Optional[Tuple[Tuple[int]]] = None):
         self.simulator = simulator
         self.random = rand
-        #self.random = np.random.RandomState(seed=rand)
+        self.latency_map = LATENCY_MAP_GT if custom_latency_map is None else custom_latency_map
 
     # noinspection PyUnusedLocal
     def latency(self, time: uint64, fromidx: int, toidx: int):
@@ -29,4 +31,7 @@ class Network(object):
         return latency
 
     def delay(self, message: MessageEvent):
-        message.time = message.time + self.latency(message.time, message.fromidx, message.toidx)
+        if message.custom_latency is not None:
+            message.time += message.custom_latency
+        else:
+            message.time += self.latency(message.time, message.fromidx, message.toidx)

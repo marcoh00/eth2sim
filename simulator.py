@@ -41,13 +41,13 @@ class Simulator:
     queue: Queue
     should_quit: bool
 
-    def __init__(self, rand: ByteVector):
+    def __init__(self, rand: ByteVector, custom_latency_map: Optional[Tuple[Tuple[int]]] = None):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
         self.simulator_prio = 2**64 - 1
         self.slot = spec.Slot(0)
         self.clients = []
-        self.network = Network(self, int.from_bytes(rand[0:4], "little"))
+        self.network = Network(self, int.from_bytes(rand[0:4], "little"), custom_latency_map)
         self.events = queue.PriorityQueue()
         self.past_events = list()
         self.random = rand
@@ -324,6 +324,7 @@ class SimulationBuilder(Builder):
     end_time: uint64
     statproducers: List[Tuple[int, int]]
     graphproducers: List[Tuple[int, int, bool]]
+    custom_latency_map: Optional[Tuple[Tuple[int]]] = None
 
     beacon_client_builders: List[BeaconClientBuilder]
 
@@ -336,6 +337,7 @@ class SimulationBuilder(Builder):
         self.end_time = uint64((8 * spec.SECONDS_PER_SLOT * spec.SLOTS_PER_EPOCH) + 24)
         self.statproducers = []
         self.graphproducers = []
+        self.custom_latency_map = None
 
     def beacon_client(self, count):
         self.current_child_count = count
@@ -371,6 +373,10 @@ class SimulationBuilder(Builder):
 
     def set_end_time(self, end_time):
         self.end_time = end_time
+        return self
+
+    def set_custom_latency_map(self, latency_map):
+        self.custom_latency_map = latency_map
         return self
 
     def add_statistics_output(self, client, time):
