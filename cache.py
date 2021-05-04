@@ -1,12 +1,8 @@
 from dataclasses import dataclass
 from typing import Dict, List, Set, Optional, Sequence, Iterable, Tuple
 
-import remerkleable
-from remerkleable.basic import uint64
-
 from eth2spec.phase0 import spec
 from eth2spec.utils.ssz import ssz_typing
-from helpers import popcnt, indices_inside_committee
 
 
 @dataclass
@@ -37,12 +33,10 @@ class CachedAttestation:
 class AttestationCache:
     cache_by_time: Dict[spec.Slot, Dict[spec.CommitteeIndex, List[CachedAttestation]]]
     cache_by_validator: Dict[spec.ValidatorIndex, List[CachedAttestation]]
-    accepted_attester_slashings: Dict[spec.ValidatorIndex, List[Tuple[spec.AttestationData, spec.AttestationData]]]
 
     def __init__(self):
         self.cache_by_time = dict()
         self.cache_by_validator = dict()
-        self.accepted_attester_slashings = dict()
 
     def add_attestation(self, attestation: spec.Attestation, state: spec.BeaconState, seen_in_block=False):
         existing_cached_attestation = self.__find_attestaion(attestation)
@@ -68,14 +62,14 @@ class AttestationCache:
         if block:
             cached_attestation.seen_in_block = True
 
-    def accept_slashing(self, slashing: spec.AttesterSlashing):
-        validators = set(slashing.attestation_1.attesting_indices)\
-            .intersection(set(slashing.attestation_2.attesting_indices))
-        for validator in validators:
-            self.__ensure_key_exists(self.accepted_attester_slashings, validator, list())
-            self.accepted_attester_slashings[validator].append(
-                (slashing.attestation_1.data, slashing.attestation_2.data)
-            )
+    # def accept_slashing(self, slashing: spec.AttesterSlashing):
+    #     validators = set(slashing.attestation_1.attesting_indices)\
+    #         .intersection(set(slashing.attestation_2.attesting_indices))
+    #     for validator in validators:
+    #         self.__ensure_key_exists(self.accepted_attester_slashings, validator, list())
+    #         self.accepted_attester_slashings[validator].append(
+    #             (slashing.attestation_1.data, slashing.attestation_2.data)
+    #         )
 
     def attestations_not_known_to_forkchoice(self, min_slot: spec.Slot, max_slot: spec.Slot)\
             -> Iterable[spec.Attestation]:
@@ -105,7 +99,8 @@ class AttestationCache:
                 validators_seen_in_kept_attestations = set()
                 for attestation in attestations:
                     # Here be dragons. We dont compare fork choice-known or seen-in-block fields yet!
-                    if any(validator not in validators_seen_in_kept_attestations for validator in attestation.attesting_indices):
+                    if any(validator not in validators_seen_in_kept_attestations
+                           for validator in attestation.attesting_indices):
                         kept_attestations.append(attestation)
                         for validator in attestation.attesting_indices:
                             validators_seen_in_kept_attestations.add(validator)
@@ -116,14 +111,15 @@ class AttestationCache:
         for slot in slots_to_clean:
             del self.cache_by_time[slot]
 
-    def search_slashings(self, validator: Optional[spec.ValidatorIndex] = None):
+    def search_slashings(self, state: spec.BeaconState, validator: Optional[spec.ValidatorIndex] = None):
         if validator is not None:
-            yield from self.__search_slashings(validator)
+            yield from self.__search_slashings(state, validator)
         else:
             for validator in self.cache_by_validator.keys():
-                yield from self.__search_slashings(validator)
+                yield from self.__search_slashings(state, validator)
 
-    def __search_slashings(self, validator: spec.ValidatorIndex) -> Iterable[spec.AttesterSlashing]:
+    def __search_slashings(self, state: spec.BeaconState, validator: spec.ValidatorIndex)\
+            -> Iterable[spec.AttesterSlashing]:
         for i in range(len(self.cache_by_validator[validator])):
             for j in range(i, len(self.cache_by_validator[validator])):
                 attestation1 = self.cache_by_validator[validator][i]
@@ -132,23 +128,11 @@ class AttestationCache:
                     attestation1.attestation.data,
                     attestation2.attestation.data
                 ):
-                    if not self.__already_slashed(validator, attestation1, attestation2):
+                    if not state.validators[validator].slashed:
                         yield spec.AttesterSlashing(
                             attestation1=attestation1.into_indexed_attestation(),
                             attestation2=attestation2.into_indexed_attestation()
                         )
-
-    def __already_slashed(self,
-                          validator: spec.ValidatorIndex,
-                          attestation1: CachedAttestation,
-                          attestation2: CachedAttestation) -> bool:
-        for slashed_data1, slashed_data2 in self.accepted_attester_slashings[validator]:
-            if (attestation1.attestation.data == slashed_data1
-                    and attestation2.attestation.data == slashed_data2)\
-                    or (attestation1.attestation.data == slashed_data2
-                        and attestation2.attestation.data == slashed_data1):
-                return True
-        return False
 
     def __find_attestaion(self, attestation: spec.Attestation) -> Optional[CachedAttestation]:
         slot, committee = attestation.data.slot, attestation.data.index
@@ -162,6 +146,7 @@ class AttestationCache:
     def __ensure_key_exists(target: dict, key, default_generator):
         if key not in target:
             target[key] = default_generator()
+
 
 """
 class AttestationCache:
@@ -264,14 +249,12 @@ class AttestationCache:
         print(str(self.attestation_cache))
 """
 
+
 class BlockCache:
     blocks: Dict[spec.Root, spec.SignedBeaconBlock]
     accepted: List[Optional[spec.Root]]
-    # For additional (slashed) blocks at the same height
     outstanding: Set[spec.Root]
-
     slashable: Set[Tuple[spec.Root]]
-    slashed: Dict[spec.ValidatorIndex, Tuple[spec.Root, spec.Root]]
 
     def __init__(self, genesis: spec.BeaconBlock):
         genesis_root = spec.hash_tree_root(genesis)
@@ -283,7 +266,6 @@ class BlockCache:
         self.accepted = [genesis_root]
         self.outstanding = set()
         self.slashable = set()
-        self.slashed = dict()
 
     def add_block(self, block: spec.SignedBeaconBlock, root: Optional[spec.Root] = None):
         if root is None:
@@ -300,7 +282,7 @@ class BlockCache:
             self.slashable.add((block_root_current_slot, root))
             # raise ValueError('Second block at same height!')
 
-    def search_slashings(self) -> Iterable[spec.ProposerSlashing]:
+    def search_slashings(self, state: spec.BeaconState) -> Iterable[spec.ProposerSlashing]:
         for root1, root2 in self.slashable:
             slashable_block = self.blocks[root1]
             original_block = self.blocks[root2]
@@ -308,7 +290,7 @@ class BlockCache:
 
             # Already slashed?
             proposer = slashable_block.message.proposer_index
-            if proposer not in self.slashed:
+            if not state.validators[proposer].slashed:
                 yield self.__produce_slashing(original_block, slashable_block)
 
     @staticmethod
@@ -366,10 +348,10 @@ class BlockCache:
             if root in self.outstanding:
                 self.outstanding.remove(root)
 
-    def accept_slashing(self, slashing: spec.ProposerSlashing):
-        proposer = slashing.signed_header_1.message.proposer_index
-        self.slashed[proposer] = (slashing.signed_header_1.message.body_root,
-                                  slashing.signed_header_2.message.body_root)
+    # def accept_slashing(self, slashing: spec.ProposerSlashing):
+    #     proposer = slashing.signed_header_1.message.proposer_index
+    #     self.slashed[proposer] = (slashing.signed_header_1.message.body_root,
+    #                               slashing.signed_header_2.message.body_root)
 
     def longest_outstanding_chain(self, store: spec.Store) -> Sequence[spec.SignedBeaconBlock]:
         chain = []

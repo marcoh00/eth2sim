@@ -50,6 +50,7 @@ class BeaconClient(Process):
 
     attestation_cache: AttestationCache
     block_cache: BlockCache
+    slashings: Dict[str, List]
 
     should_quit: bool
 
@@ -61,7 +62,8 @@ class BeaconClient(Process):
                  configname: str,
                  validator_builders: Sequence[ValidatorBuilder],
                  validator_first_counter: int,
-                 debug=False):
+                 debug=False,
+                 profile=False):
         super().__init__()
         self.counter = counter
         self.simulator_to_client_queue = simulator_to_client_queue
@@ -81,7 +83,8 @@ class BeaconClient(Process):
         self.specconf = (configpath, configname)
         self.debug = debug
         self.debugfile = None
-        self.profile = False
+        self.profile = profile
+        self.slashings = {'proposer': [], 'attester': []}
         self.build_validators()
 
     def __debug(self, obj, typ: str):
@@ -256,14 +259,14 @@ class BeaconClient(Process):
 
         # Include slashable blocks and attestations if the corresponding validators are deemed slashable
         proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list(
-            slashing for slashing in self.block_cache.search_slashings()
+            slashing for slashing in self.block_cache.search_slashings(head_state)
             if spec.is_slashable_validator(
                 head_state.validators[slashing.signed_header_1.message.proposer_index],
                 spec.get_current_epoch(head_state)
             )
         )
         attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
-            slashing for slashing in self.attestation_cache.search_slashings()
+            slashing for slashing in self.attestation_cache.search_slashings(head_state)
             if any(
                 spec.is_slashable_validator(head_state.validators[vindex], spec.get_current_epoch(head_state))
                 for vindex in set(slashing.attestation_1.attesting_indices)
@@ -380,7 +383,11 @@ class BeaconClient(Process):
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         slot = spec.Slot(message.slot)
         attestations_to_aggregate = dict()
+
+        # Attestations are aggregated per committee
         for committee in (spec.CommitteeIndex(c) for c in range(self.committee_count[current_epoch])):
+            # Aggregate all known unaggregated attestations which represent
+            # the same vote this beacon client and its validators attested for
             attestations_to_aggregate[committee] = [
                 attestationcache.attestation
                 for attestationcache
@@ -389,6 +396,7 @@ class BeaconClient(Process):
                 and len(attestationcache.attesting_indices) == 1
             ]
         for (validator_index, validator) in attesting_validators.items():
+            # For each validator, check if it is supposed to aggregate
             validator_committee = self.committee[self.current_slot][validator_index][0]
             slot_signature = spec.get_slot_signature(self.state, spec.Slot(message.slot), validator.privkey)
             if not spec.is_aggregator(self.state,
@@ -399,6 +407,7 @@ class BeaconClient(Process):
 
             aggregation_bits = list(0 for _ in range(self.committee[self.current_slot][validator_index][2]))
 
+            # Set all bits representing the validators inside the aggregated attestation
             for attestation in attestations_to_aggregate[validator_committee]:
                 for idx, bit in enumerate(attestation.aggregation_bits):
                     if bit:
@@ -441,13 +450,14 @@ class BeaconClient(Process):
         self.handle_attestation(aggregate.message.aggregate)
 
     def handle_block(self, block: spec.SignedBeaconBlock):
-        # Try to process an old chains first
+        # Try to process an old chain first
         old_chain = self.block_cache.longest_outstanding_chain(self.store)
         if len(old_chain) > 0:
             self.__debug(len(old_chain), 'OrphanedBlocksToHandle')
         for cblock in old_chain:
             spec.on_block(self.store, cblock)
             self.block_cache.accept_block(cblock)
+            self.__process_block_contents(cblock)
 
         # Process the new block now
         self.__debug({
@@ -459,27 +469,30 @@ class BeaconClient(Process):
         try:
             chain = self.block_cache.chain_for_block(block, self.store)
         except KeyError as e:
-            print(f'[BEACON CLIENT {self.counter}] Could not validate block: {e}')
+            print(f'[BEACON CLIENT {self.counter}] Could not validate block: {e} - parts of chain are missing')
             chain = []
-        self.__debug(str(len(chain)), 'BlocksToHandle')
+        self.__debug(len(chain), 'BlocksToHandle')
         for cblock in chain:
             try:
                 spec.on_block(self.store, cblock)
                 self.block_cache.accept_block(cblock)
-                for aslashing in cblock.message.body.attester_slashings:
-                    self.__debug(aslashing, 'AttesterSlashing')
-                    self.attestation_cache.accept_slashing(aslashing)
-                for pslashing in cblock.message.body.proposer_slashings:
-                    self.__debug(pslashing, 'ProposerSlashing')
-                    self.block_cache.accept_slashing(pslashing)
-                for attestation in block.message.body.attestations:
-                    self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
+                self.__process_block_contents(cblock)
             except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
                 print(f'[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
+
+    def __process_block_contents(self, block: spec.SignedBeaconBlock):
+        for aslashing in block.message.body.attester_slashings:
+            self.__debug(aslashing, 'AttesterSlashing')
+            self.slashings['attester'].append(aslashing)
+        for pslashing in block.message.body.proposer_slashings:
+            self.__debug(pslashing, 'ProposerSlashing')
+            self.slashings['proposer'].append(pslashing)
+        for attestation in block.message.body.attestations:
+            self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -700,14 +713,14 @@ def statistics(client: BeaconClient) -> Statistics:
         leafs_since_finalization=tuple(str(root) for root in get_leaf_blocks(client.store,
                                                                              client.store.finalized_checkpoint.root)),
         orphans=get_orphans(client.store),
-        attester_slashings=tuple(client.attestation_cache.accepted_attester_slashings.keys()),
-        proposer_slashings=tuple(client.block_cache.slashed.keys()),
+        attester_slashings=client.slashings['attester'],
+        proposer_slashings=client.slashings['proposer'],
         finality_delay=spec.get_finality_delay(client.state),
         validators_left=tuple((spec.ValidatorIndex(v[0]), v[1].exit_epoch)
                               for v in enumerate(client.state.validators)
                               if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH),
-        balances={v[0]: v[1].effective_balance
-                  for v in enumerate(client.state.validators)}
+        balances={index: client.state.balances[index]
+                  for index, _ in enumerate(client.state.validators)}
     )
 
 
@@ -786,7 +799,8 @@ class BeaconClientBuilder(Builder):
             configname=self.configname,
             validator_builders=self.validator_builders,
             validator_first_counter=self.validator_start_at,
-            debug=self.debug
+            debug=self.debug,
+            profile=self.profile
         )
 
     def register(self, child_builder: ValidatorBuilder):
