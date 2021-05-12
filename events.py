@@ -4,6 +4,7 @@ from typing import Union, Optional
 from remerkleable.basic import uint64
 
 from eth2spec.phase0 import spec
+from random import randint
 
 
 MESSAGE_TYPE = Union[spec.Attestation, spec.SignedAggregateAndProof, spec.SignedBeaconBlock]
@@ -17,6 +18,8 @@ those who don't:
 
 NextSlot/AttestationOpportunity/AggregationOpportunity > Block > Attestation/AggregatedAttestation
 """
+
+
 @dataclass
 class Event:
     time: uint64
@@ -68,6 +71,8 @@ class MessageEvent(Event):
     fromidx: int
     toidx: Optional[int]
     custom_latency: Optional[int] = field(default=None)
+    delayed: Optional[int] = field(default=None)
+    marker: Optional[int] = field(default_factory=lambda: randint(0, 4294967296))
 
 
 @dataclass

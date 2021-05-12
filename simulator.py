@@ -219,6 +219,7 @@ class Simulator:
                     message=event.message,
                     message_type=event.message_type,
                     fromidx=event.fromidx,
+                    marker=event.marker,
                     toidx=index
                 )
                 self.network.delay(event_with_receiver)

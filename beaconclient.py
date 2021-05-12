@@ -168,6 +168,13 @@ class BeaconClient(Process):
             'BeaconBlock': self.handle_genesis_block,
             'BeaconState': self.handle_genesis_state
         }
+        self.__debug({
+            'time': event.time,
+            'prio': event.priority,
+            'type': event.message_type,
+            'marker': event.marker,
+            'delayed': event.delayed
+        }, 'MessageRecv')
         payload = decoder[event.message_type].decode_bytes(event.message)
         # noinspection PyArgumentList
         actions[event.message_type](payload)
@@ -317,16 +324,18 @@ class BeaconClient(Process):
         )
         encoded_signed_block = signed_block.encode_bytes()
 
-        self.client_to_simulator_queue.put(MessageEvent(
+        message = MessageEvent(
             time=self.current_time,
             priority=20,
             message=encoded_signed_block,
             message_type='SignedBeaconBlock',
             fromidx=self.counter,
             toidx=None
-        ))
+        )
+        self.client_to_simulator_queue.put(message)
         if self.debug:
             self.graph(show=True)
+        self.__debug(message.marker, 'BlockMessageSent')
         self.__debug(signed_block, 'ProposeBlock')
 
     def handle_next_slot_event(self, message: NextSlotEvent):
@@ -431,14 +440,16 @@ class BeaconClient(Process):
                 signature=aggregate_and_proof_signature
             )
             encoded_aggregate_and_proof = signed_aggregate_and_proof.encode_bytes()
-            self.client_to_simulator_queue.put(MessageEvent(
+            send_message = MessageEvent(
                 time=self.current_time,
                 priority=30,
                 message=encoded_aggregate_and_proof,
                 message_type='SignedAggregateAndProof',
                 fromidx=self.counter,
                 toidx=None
-            ))
+            )
+            self.client_to_simulator_queue.put(send_message)
+            self.__debug(send_message.marker, 'AggregateAndProofMessageSent')
             self.__debug(signed_aggregate_and_proof, 'AggregateAndProofSend')
 
     def handle_attestation(self, attestation: spec.Attestation):
@@ -576,6 +587,7 @@ class BeaconClient(Process):
                 toidx=None
             )
             self.client_to_simulator_queue.put(message)
+            self.__debug(message.marker, 'AttestationMessageSent')
             self.__debug(attestation, 'AttestationSend')
 
     def __compute_head(self):
@@ -773,6 +785,7 @@ class BeaconClientBuilder(Builder):
     validator_start_at: int
     recv_queue: JoinableQueue
     send_queue: Queue
+    mode: str
 
     def __init__(self, configpath, configname, parent_builder=None,):
         super(BeaconClientBuilder, self).__init__(parent_builder)
@@ -782,7 +795,7 @@ class BeaconClientBuilder(Builder):
         self.debug = False
         self.debugfile = None
         self.profile = False
-
+        self.mode = 'HONEST'
         self.neccessary_info_set = False
         self.validator_start_at = 0
         self.simulator_to_client_queue = JoinableQueue()
@@ -791,17 +804,21 @@ class BeaconClientBuilder(Builder):
     def build_impl(self, counter):
         if not self.neccessary_info_set:
             raise ValueError('Need to specify queues and validator start index')
-        return BeaconClient(
-            counter=counter,
-            simulator_to_client_queue=self.simulator_to_client_queue,
-            client_to_simulator_queue=self.client_to_simulator_queue,
-            configpath=self.configpath,
-            configname=self.configname,
-            validator_builders=self.validator_builders,
-            validator_first_counter=self.validator_start_at,
-            debug=self.debug,
-            profile=self.profile
-        )
+        if self.mode not in ('HONEST',):
+            raise ValueError(f'Unknown mode: {self.mode}')
+
+        if self.mode == 'HONEST':
+            return BeaconClient(
+                counter=counter,
+                simulator_to_client_queue=self.simulator_to_client_queue,
+                client_to_simulator_queue=self.client_to_simulator_queue,
+                configpath=self.configpath,
+                configname=self.configname,
+                validator_builders=self.validator_builders,
+                validator_first_counter=self.validator_start_at,
+                debug=self.debug,
+                profile=self.profile
+            )
 
     def register(self, child_builder: ValidatorBuilder):
         child_builder.validators_count = int(self.validators_count)
@@ -813,6 +830,10 @@ class BeaconClientBuilder(Builder):
 
     def set_profile(self, flag=False):
         self.profile = flag
+        return self
+
+    def set_mode(self, mode):
+        self.mode = mode
         return self
 
     def validators(self, count):

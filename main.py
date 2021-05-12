@@ -74,7 +74,11 @@ def main():
         .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
         .add_statistics_output(1, calc_simtime(1, 3, 1)) \
         .add_statistics_output(0, calc_simtime(2, 6, 1)) \
+        .set_custom_latency_map(((0, 1), (200, 2), (230, 3),
+                                 (245, 4), (250, 5), (253, 8))) \
         .beacon_client(8)\
+        .set_mode('HONEST')\
+        .set_debug(True)\
         .validators(32)\
         .build()\
         .build() \
