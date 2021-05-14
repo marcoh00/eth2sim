@@ -1,5 +1,6 @@
 import argparse
 import multiprocessing
+import os
 import sys
 from datetime import datetime
 from importlib import reload
@@ -39,6 +40,7 @@ def main():
     spec.bls.bls_active = False
 
     print('Ethereum 2.0 Beacon Chain Simulator')
+    print(f'PID: {os.getpid()}')
     print(f'Beacon Chain Configuration: {spec.CONFIG_NAME}')
     print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
@@ -74,18 +76,18 @@ def main():
         .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
         .add_statistics_output(1, calc_simtime(1, 3, 1)) \
         .add_statistics_output(0, calc_simtime(2, 6, 1)) \
-        .set_custom_latency_map(((0, 1), (200, 2), (230, 3),
-                                 (245, 4), (250, 5), (253, 8))) \
         .beacon_client(8)\
         .set_mode('HONEST')\
-        .set_debug(True)\
         .validators(32)\
         .build()\
         .build() \
         .beacon_client(1) \
-        .set_profile(True) \
         .set_debug(True) \
         .validators(16) \
+        .build() \
+        .build() \
+        .beacon_client(10) \
+        .validators(1) \
         .build() \
         .build() \
         .build()

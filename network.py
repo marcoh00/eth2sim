@@ -1,4 +1,4 @@
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union, Dict
 
 from remerkleable.basic import uint64
 
@@ -6,22 +6,36 @@ import hashlib
 from events import MessageEvent, MESSAGE_TYPE
 
 USE_RANDOM_LATENCY = True
-LATENCY_MAP_GT = ((0, 1), (200, 2), (230, 3), (245, 4), (250, 5), (253, 8))
 LATENCY_MAP_BLOCK = ((0, 0), (51, 1), (230, 2))
 LATENCY_MAP_AGG_ATTESTATION = ((0, 0), (102, 1), (153, 2), (179, 4), (204, 6), (230, 9), (242, 10))
 LATENCY_MAP_ATTESTATION = ((0, 0), (78, 1), (179, 2), (204, 3), (230, 4), (242, 5))
-
+LATENCY_MAP_GT = LATENCY_MAP_AGG_ATTESTATION
 
 class Network(object):
-    def __init__(self, simulator, rand, custom_latency_map: Optional[Tuple[Tuple[int]]] = None):
+    def __init__(self, simulator, rand, custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None):
         self.simulator = simulator
         self.random = rand
-        self.default_latency_map = LATENCY_MAP_GT if custom_latency_map is None else custom_latency_map
-        self.additional_maps = {
-            'Attestation': LATENCY_MAP_ATTESTATION,
-            'SignedAggregateAndProof': LATENCY_MAP_AGG_ATTESTATION,
-            'SignedBeaconBlock': LATENCY_MAP_BLOCK
-        }
+        if type(custom_latency_map) == dict:
+            dictkeys = tuple(custom_latency_map.keys())
+            if '' in custom_latency_map:
+                self.default_latency_map = custom_latency_map['']
+                print(f'[NETWORK] Using custom latency maps with a custom fallback for: {dictkeys}')
+            else:
+                self.default_latency_map = LATENCY_MAP_GT
+                print(f'[NETWORK] Using custom latency maps with default fallback for: {dictkeys}')
+            self.additional_maps = custom_latency_map
+        elif type(custom_latency_map) == tuple:
+            self.default_latency_map = custom_latency_map
+            self.additional_maps = dict()
+            print('[NETWORK] Using a single custom latency map')
+        else:
+            self.default_latency_map = LATENCY_MAP_GT
+            self.additional_maps = {
+                'Attestation': LATENCY_MAP_ATTESTATION,
+                'SignedAggregateAndProof': LATENCY_MAP_AGG_ATTESTATION,
+                'SignedBeaconBlock': LATENCY_MAP_BLOCK
+            }
+            print(f'[NETWORK] Using default latency maps')
 
     # noinspection PyUnusedLocal
     def latency(self, time: uint64, fromidx: int, toidx: int, msgtype=None):

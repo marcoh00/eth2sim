@@ -3,7 +3,7 @@ import queue
 from dataclasses import dataclass
 from multiprocessing import Queue, JoinableQueue
 from pathlib import Path
-from typing import Optional, List, Sequence, Iterable, Union, Tuple
+from typing import Optional, List, Sequence, Iterable, Union, Tuple, Dict
 
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
@@ -41,7 +41,7 @@ class Simulator:
     queue: Queue
     should_quit: bool
 
-    def __init__(self, rand: ByteVector, custom_latency_map: Optional[Tuple[Tuple[int]]] = None):
+    def __init__(self, rand: ByteVector, custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
         self.simulator_prio = 2**64 - 1
@@ -208,6 +208,8 @@ class Simulator:
             self.__distribute_event(event, event.toidx)
 
     def __recv_message_event(self, event: MessageEvent):
+        if event.message_type == 'SignedBeaconBlock':
+            print(f"[{simtime(self.start_time)}] Block Message by Beacon Client {event.fromidx}")
         if event.toidx is not None:
             self.network.delay(event)
             self.events.put(event)
@@ -248,14 +250,14 @@ class Simulator:
             SimulationEndEvent: self.__recv_end_event
         }
 
-        start_time = datetime.datetime.now()
-        print(f"[{simtime(start_time)}] Start Simulation")
+        self.start_time = datetime.datetime.now()
+        print(f"[{simtime(self.start_time)}] Start Simulation")
 
         while not self.should_quit:
             top = self.events.get()
             self.simulator_time = top.time
             self.simulator_prio = top.priority
-            print(f'[{simtime(start_time)}] Current time: {self.simulator_time} '
+            print(f'[{simtime(self.start_time)}] Current time: {self.simulator_time} '
                   f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
             current_time_and_prio_events = list(self.__collect_events_upto_current_time_and_prio())
             current_time_and_prio_events.append(top)
@@ -271,10 +273,10 @@ class Simulator:
                         # noinspection PyArgumentList
                         recv_actions[type(recv_event)](recv_event)
                         if recv_event.time < self.simulator_time:
-                            print(f'[{simtime(start_time)}][WARNING] Shall distribute event for the past! {recv_event}')
+                            print(f'[{simtime(self.start_time)}][WARNING] Shall distribute event for the past! {recv_event}')
                         recv_event = queue_element_or_none(self.queue)
                 current_time_and_prio_events = tuple(self.__collect_events_upto_current_time_and_prio())
-        print(f'[{simtime(start_time)}] [SIMULATOR] FINISH SIMULATION AT TIMESTAMP {self.simulator_time} '
+        print(f'[{simtime(self.start_time)}] [SIMULATOR] FINISH SIMULATION AT TIMESTAMP {self.simulator_time} '
               f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
 
     def __collect_events_upto_current_time_and_prio(self, progress_time=False) -> Iterable[Event]:
@@ -325,7 +327,7 @@ class SimulationBuilder(Builder):
     end_time: uint64
     statproducers: List[Tuple[int, int]]
     graphproducers: List[Tuple[int, int, bool]]
-    custom_latency_map: Optional[Tuple[Tuple[int]]] = None
+    custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None
 
     beacon_client_builders: List[BeaconClientBuilder]
 
@@ -362,7 +364,7 @@ class SimulationBuilder(Builder):
             clients.append(indexed_client)
             client_counter += 1
             validator_counter += len(indexed_client.beacon_client.validators)
-        simulator = Simulator(self.rand)
+        simulator = Simulator(self.rand, self.custom_latency_map)
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
         simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time, 0))

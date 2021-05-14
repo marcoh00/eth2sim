@@ -231,8 +231,10 @@ class BeaconClient(Process):
                 committee = spec.get_beacon_committee(self.state, spec.Slot(slot), spec.CommitteeIndex(committee_index))
                 for validator_index in enumerate(committee):
                     self.committee[slot][validator_index[1]] = (committee_index, validator_index[0], len(committee))
+            self.__debug({'slot': int(slot), 'committee': str(self.committee[slot])}, 'CommitteeUpdate')
 
     def propose_block(self, validator: Validator, head_state: spec.BeaconState, slashme=False):
+        print(f"[BEACON CLIENT {self.counter}] Create block for Validator {self.proposer_current_slot}")
         min_slot_to_include = spec.compute_start_slot_at_epoch(
             spec.compute_epoch_at_slot(self.current_slot)
         ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
@@ -373,7 +375,6 @@ class BeaconClient(Process):
         indexed_validators = {validator.index: validator for validator in self.validators}
         if self.proposer_current_slot in indexed_validators and not self.__slashed(self.proposer_current_slot):
             # Propose block if needed
-            print(f"[BEACON CLIENT {self.counter}] Validator {self.proposer_current_slot} is proposer")
             self.propose_block(indexed_validators[self.proposer_current_slot], head_state)
             if message.slot == 4:
                 print('YOLO')
