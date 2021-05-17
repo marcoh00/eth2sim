@@ -138,6 +138,8 @@ class BeaconClient(Process):
                 SimulationEndEvent(time=self.current_time,
                                    message=f"Own time {self.current_time} is later than event time {event.time}. {event}/{self.event_cache}")
             )
+        if event.time > self.current_time and self.debug and self.debugfile:
+            self.debugfile.flush()
         self.event_cache = event
         self.current_time = event.time
         actions = {

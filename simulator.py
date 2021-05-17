@@ -3,7 +3,7 @@ import queue
 from dataclasses import dataclass
 from multiprocessing import Queue, JoinableQueue
 from pathlib import Path
-from typing import Optional, List, Sequence, Iterable, Union, Tuple, Dict
+from typing import Optional, List, Sequence, Iterable, Union, Tuple, Dict, Callable
 
 from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
@@ -41,13 +41,16 @@ class Simulator:
     queue: Queue
     should_quit: bool
 
-    def __init__(self, rand: ByteVector, custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None):
+    def __init__(self,
+                 rand: ByteVector,
+                 custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None,
+                 latency_modifier: Optional[Callable[[int], int]] = None):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
         self.simulator_prio = 2**64 - 1
         self.slot = spec.Slot(0)
         self.clients = []
-        self.network = Network(self, int.from_bytes(rand[0:4], "little"), custom_latency_map)
+        self.network = Network(self, int.from_bytes(rand[0:4], "little"), custom_latency_map, latency_modifier)
         self.events = queue.PriorityQueue()
         self.past_events = list()
         self.random = rand
@@ -328,6 +331,7 @@ class SimulationBuilder(Builder):
     statproducers: List[Tuple[int, int]]
     graphproducers: List[Tuple[int, int, bool]]
     custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None
+    latency_modifier: Callable[[int], int]
 
     beacon_client_builders: List[BeaconClientBuilder]
 
@@ -341,6 +345,7 @@ class SimulationBuilder(Builder):
         self.statproducers = []
         self.graphproducers = []
         self.custom_latency_map = None
+        self.latency_modifier = lambda x: x
 
     def beacon_client(self, count):
         self.current_child_count = count
@@ -364,7 +369,7 @@ class SimulationBuilder(Builder):
             clients.append(indexed_client)
             client_counter += 1
             validator_counter += len(indexed_client.beacon_client.validators)
-        simulator = Simulator(self.rand, self.custom_latency_map)
+        simulator = Simulator(self.rand, self.custom_latency_map, self.latency_modifier)
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
         simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time, 0))
@@ -378,8 +383,10 @@ class SimulationBuilder(Builder):
         self.end_time = end_time
         return self
 
-    def set_custom_latency_map(self, latency_map):
+    def set_custom_latency_map(self, latency_map, modifier=None):
         self.custom_latency_map = latency_map
+        if modifier is not None:
+            self.latency_modifier = modifier
         return self
 
     def add_statistics_output(self, client, time):

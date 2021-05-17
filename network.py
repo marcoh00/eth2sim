@@ -12,7 +12,11 @@ LATENCY_MAP_ATTESTATION = ((0, 0), (78, 1), (179, 2), (204, 3), (230, 4), (242, 
 LATENCY_MAP_GT = LATENCY_MAP_AGG_ATTESTATION
 
 class Network(object):
-    def __init__(self, simulator, rand, custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None):
+    def __init__(self,
+                 simulator,
+                 rand,
+                 custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None,
+                 latency_modifier = None):
         self.simulator = simulator
         self.random = rand
         if type(custom_latency_map) == dict:
@@ -36,6 +40,9 @@ class Network(object):
                 'SignedBeaconBlock': LATENCY_MAP_BLOCK
             }
             print(f'[NETWORK] Using default latency maps')
+        self.latency_modifier = latency_modifier
+        if self.latency_modifier is None:
+            self.latency_modifier = lambda x: x
 
     # noinspection PyUnusedLocal
     def latency(self, time: uint64, fromidx: int, toidx: int, msgtype=None):
@@ -49,7 +56,7 @@ class Network(object):
             else self.additional_maps[msgtype]
         for maptuple in latency_map:
             if rndvalue > maptuple[0]:
-                latency = maptuple[1]
+                latency = self.latency_modifier(maptuple[1])
         if fromidx == toidx:
             latency = 0
         # print(f'LATENCY [{time},{fromidx},{toidx}] {latency} [[{latency_map}]]')
