@@ -1,5 +1,6 @@
 import cProfile
 import json
+import pathlib
 import pprint
 import sys
 import traceback
@@ -85,6 +86,7 @@ class BeaconClient(Process):
         self.debugfile = None
         self.profile = profile
         self.slashings = {'proposer': [], 'attester': []}
+        self.starttime = int(time.time())
         self.build_validators()
 
     def __debug(self, obj, typ: str):
@@ -190,7 +192,12 @@ class BeaconClient(Process):
         if event.print_event:
             pprint.pp(asdict)
         self.__debug(str(stats), 'Statistics')
-        with open(f'stats_{self.counter}_{int(time.time())}.json', 'a') as fp:
+        filename = f'stats_{self.counter}_{self.starttime}.json'
+        if not pathlib.Path(f'stats_{self.counter}_{self.starttime}.json').is_file():
+            with open(filename, 'w', encoding='utf-8') as fp:
+                fp.write('[')
+        with open(f'stats_{self.counter}_{self.starttime}.json', 'a') as fp:
+            fp.write(',\n')
             json.dump(asdict, fp, indent=2)
 
     def produce_graph_event(self, event: ProduceGraphEvent):
@@ -212,6 +219,10 @@ class BeaconClient(Process):
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
         self.__debug(event, 'SimulationEnd')
+        statsfile = f'stats_{self.counter}_{self.starttime}.json'
+        if self.debug and pathlib.Path(statsfile).is_file():
+            with open(statsfile, 'a', encoding='utf-8') as fp:
+                fp.write(']')
         print(f'[BEACON CLIENT {self.counter}] Received SimulationEndEvent')
         time.sleep(3)
         # Mark all remaining tasks as done

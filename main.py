@@ -107,7 +107,7 @@ def main():
     #simulator.generate_genesis(filename='8_8192_minimal')
     #simulator.initialize_clients()
     #simulator.start_simulation()
-
+    eth1blockhash = '0000000000000000000000000000000000000000000000000000000000000000'
     #simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
     #    .set_end_time(9999999999999) \
     #    .set_custom_latency_map(None, modifier=lambda l: l // 2) \
