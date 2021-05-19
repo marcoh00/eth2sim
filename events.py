@@ -56,7 +56,7 @@ class TargetedEvent(Event):
 
 @dataclass
 class ProduceStatisticsEvent(TargetedEvent):
-    pass
+    print_event: bool = field(default=False)
 
 
 @dataclass

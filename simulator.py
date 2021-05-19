@@ -99,10 +99,14 @@ class Simulator:
         deposit_data = []
         deposits = []
 
-        print('[SIMULATOR] Generate Genesis state')
+        print(f'[SIMULATOR] Generate Genesis state ({sum(len(client.beacon_client.validators) for client in self.clients)} validators)')
+        validatorno = 0
+        start_time = datetime.datetime.now()
         eth1_timestamp = spec.MIN_GENESIS_TIME
         for client in self.clients:
             for validator in client.beacon_client.validators:
+                if validatorno % 1000 == 0:
+                    print(f"[SIMULATOR] Deposit #{validatorno} - {simtime(start_time)}")
                 deposit, root, deposit_data = build_deposit(
                     spec=spec,
                     deposit_data_list=deposit_data,
@@ -113,6 +117,7 @@ class Simulator:
                     signed=True
                 )
                 deposits.append(deposit)
+                validatorno += 1
 
         self.genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
         assert spec.is_valid_genesis_state(self.genesis_state)
@@ -212,7 +217,7 @@ class Simulator:
 
     def __recv_message_event(self, event: MessageEvent):
         if event.message_type == 'SignedBeaconBlock':
-            print(f"[{simtime(self.start_time)}] Block Message by Beacon Client {event.fromidx}")
+            print(f"[{simtime(self.start_time)}] Block Message {id(event)} by Beacon Client {event.fromidx}")
         if event.toidx is not None:
             self.network.delay(event)
             self.events.put(event)

@@ -187,10 +187,11 @@ class BeaconClient(Process):
     def handle_statistics_event(self, event: ProduceStatisticsEvent):
         stats = statistics(self)
         asdict = dataclasses.asdict(stats)
-        pprint.pp(asdict)
+        if event.print_event:
+            pprint.pp(asdict)
         self.__debug(str(stats), 'Statistics')
-        with open(f'stats_{self.counter}_{int(time.time())}', 'a') as fp:
-            pprint.pp(asdict, fp)
+        with open(f'stats_{self.counter}_{int(time.time())}.json', 'a') as fp:
+            json.dump(asdict, fp, indent=2)
 
     def produce_graph_event(self, event: ProduceGraphEvent):
         self.graph(event.show)
@@ -220,7 +221,7 @@ class BeaconClient(Process):
             next_task = queue_element_or_none(self.simulator_to_client_queue)
         self.should_quit = True
         if self.debug:
-            self.graph(show=True)
+            self.graph(show=False)
 
     def update_committee(self, epoch: spec.Epoch):
         start_slot = spec.compute_start_slot_at_epoch(epoch)
@@ -338,7 +339,7 @@ class BeaconClient(Process):
         )
         self.client_to_simulator_queue.put(message)
         if self.debug:
-            self.graph(show=True)
+            self.graph(show=False)
         self.__debug(message.marker, 'BlockMessageSent')
         self.__debug(signed_block, 'ProposeBlock')
 
@@ -381,6 +382,9 @@ class BeaconClient(Process):
             if message.slot == 4:
                 print('YOLO')
                 self.propose_block(indexed_validators[self.proposer_current_slot], head_state, True)
+        self.handle_statistics_event(
+            ProduceStatisticsEvent(time=self.current_time, priority=0, toidx=None, print_event=False)
+        )
 
     def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested is None or self.slot_last_attested < message.slot:
@@ -501,10 +505,10 @@ class BeaconClient(Process):
     def __process_block_contents(self, block: spec.SignedBeaconBlock):
         for aslashing in block.message.body.attester_slashings:
             self.__debug(aslashing, 'AttesterSlashing')
-            self.slashings['attester'].append(aslashing)
+            self.slashings['attester'].append(str(aslashing))
         for pslashing in block.message.body.proposer_slashings:
             self.__debug(pslashing, 'ProposerSlashing')
-            self.slashings['proposer'].append(pslashing)
+            self.slashings['proposer'].append(str(pslashing))
         for attestation in block.message.body.attestations:
             self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
 

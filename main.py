@@ -70,30 +70,72 @@ def main():
     # simulator.initialize_clients()
     # simulator.start_simulation()
 
-    simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
-        .set_end_time(calc_simtime(2, 6, 2))\
-        .add_graph_output(1, calc_simtime(1, 3, 1), show=True)\
-        .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
-        .add_statistics_output(1, calc_simtime(1, 3, 1)) \
-        .add_statistics_output(0, calc_simtime(2, 6, 1)) \
-        .beacon_client(8)\
-        .set_mode('HONEST')\
-        .validators(32)\
+    # simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
+    #     .set_end_time(calc_simtime(2, 6, 2))\
+    #     .add_graph_output(1, calc_simtime(1, 3, 1), show=True)\
+    #     .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
+    #     .add_statistics_output(1, calc_simtime(1, 3, 1)) \
+    #     .add_statistics_output(0, calc_simtime(2, 6, 1)) \
+    #     .beacon_client(8)\
+    #     .set_mode('HONEST')\
+    #     .validators(32)\
+    #     .build()\
+    #     .build() \
+    #     .beacon_client(1) \
+    #     .set_debug(True) \
+    #     .validators(16) \
+    #     .build() \
+    #     .build() \
+    #     .beacon_client(10) \
+    #     .validators(1) \
+    #     .build() \
+    #     .build() \
+    #     .build()
+    # simulator.generate_genesis(filename='simple_simulation')
+    # simulator.initialize_clients()
+    # simulator.start_simulation()
+
+    #simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
+    #.set_end_time(9999999999999)\
+    #.set_custom_latency_map(None, modifier=lambda l: l // 2)\
+    #.beacon_client(8)\
+    #.set_debug(True)\
+    #.validators(1024)\
+    #.build()\
+    #.build()\
+    #.build()
+    #simulator.generate_genesis(filename='8_8192_minimal')
+    #simulator.initialize_clients()
+    #simulator.start_simulation()
+
+    #simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
+    #    .set_end_time(9999999999999) \
+    #    .set_custom_latency_map(None, modifier=lambda l: l // 2) \
+    #    .beacon_client(128) \
+    #    .set_debug(True) \
+    #    .validators(128) \
+    #    .build() \
+    #    .build() \
+    #    .build()
+    #simulator.generate_genesis(filename='128_16384_mainnet')#
+
+    simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
+        .set_end_time(9999999999999) \
+        .set_custom_latency_map(None, modifier=lambda l: l // 2) \
+        .beacon_client(128) \
+        .set_debug(True) \
+        .validators(1061) \
         .build()\
-        .build() \
+        .build()\
         .beacon_client(1) \
         .set_debug(True) \
-        .validators(16) \
-        .build() \
-        .build() \
-        .beacon_client(10) \
-        .validators(1) \
+        .validators(43) \
         .build() \
         .build() \
         .build()
-    simulator.generate_genesis(filename='simple_simulation')
-    simulator.initialize_clients()
-    simulator.start_simulation()
+    simulator.generate_genesis(filename='129_135851_mainnet')
+    #simulator.initialize_clients()
+    #simulator.start_simulation()
 
 
 if __name__ == '__main__':
