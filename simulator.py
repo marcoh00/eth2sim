@@ -12,10 +12,10 @@ import eth2spec.phase0.spec as spec
 from beaconclient import BeaconClient, BeaconClientBuilder
 from builder import Builder
 from eth2spec.phase0 import spec
-from eth2spec.test.helpers.deposits import build_deposit
+from eth2spec.test.helpers.deposits import build_deposit, build_deposit_data
 from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
     Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent, ValidatorInitializationEvent
-from helpers import queue_element_or_none
+from helpers import initialize_beacon_state_from_mocked_eth1, queue_element_or_none
 from network import Network
 
 
@@ -95,7 +95,7 @@ class Simulator:
             encoded_block = fp.read()
             self.genesis_block = spec.BeaconBlock.decode_bytes(encoded_block)
 
-    def generate_genesis(self, filename=None):
+    def generate_genesis(self, filename=None, mocked=False):
         deposit_data = []
         deposits = []
 
@@ -106,28 +106,46 @@ class Simulator:
         for client in self.clients:
             for validator in client.beacon_client.validators:
                 if validatorno % 1000 == 0:
-                    print(f"[SIMULATOR] Deposit #{validatorno} - {simtime(start_time)}")
-                deposit, root, deposit_data = build_deposit(
-                    spec=spec,
-                    deposit_data_list=deposit_data,
-                    pubkey=validator.pubkey,
-                    privkey=validator.privkey,
-                    amount=validator.startbalance,
-                    withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
-                    signed=True
+                    print(f"[SIMULATOR][Deposit] Create deposit #{validatorno}")
+                if mocked:
+                    deposit_data = build_deposit_data(
+                        spec=spec,
+                        pubkey=validator.pubkey,
+                        privkey=validator.privkey,
+                        amount=validator.startbalance,
+                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
+                        signed=True
+                    )
+                    deposit = spec.Deposit(
+                        proof=list(bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000') for _ in range(0, spec.DEPOSIT_CONTRACT_TREE_DEPTH + 1)),
+                        data=deposit_data
+                    )
+                else:
+                    deposit, root, deposit_data = build_deposit(
+                        spec=spec,
+                        deposit_data_list=deposit_data,
+                        pubkey=validator.pubkey,
+                        privkey=validator.privkey,
+                        amount=validator.startbalance,
+                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
+                        signed=True
                 )
                 deposits.append(deposit)
                 validatorno += 1
 
-        self.genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
+        if mocked:
+            self.genesis_state = initialize_beacon_state_from_mocked_eth1(spec, self.random, eth1_timestamp, deposits)
+        else:
+            self.genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
         assert spec.is_valid_genesis_state(self.genesis_state)
         self.genesis_block = spec.BeaconBlock(state_root=spec.hash_tree_root(self.genesis_state))
         print('[SIMULATOR] Genesis generation successful')
 
         if filename is not None:
             print('[SIMULATOR] Export Genesis State and Block to file')
-            state_file = f"state_{filename}.ssz"
-            block_file = f"block_{filename}.ssz"
+            mocked = "_mocked_" if mocked else ""
+            state_file = f"state_{mocked}{filename}.ssz"
+            block_file = f"block_{mocked}{filename}.ssz"
             with open(state_file, 'wb') as fp:
                 fp.write(self.genesis_state.encode_bytes())
             with open(block_file, 'wb') as fp:

@@ -70,7 +70,7 @@ def main():
     # simulator.initialize_clients()
     # simulator.start_simulation()
 
-    # simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
+    # simulator = SimulationBuilder('../../configs', 'minimal', args.eth1blockhash)\
     #     .set_end_time(calc_simtime(2, 6, 2))\
     #     .add_graph_output(1, calc_simtime(1, 3, 1), show=True)\
     #     .add_graph_output(0, calc_simtime(2, 6, 1), show=True) \
@@ -91,7 +91,7 @@ def main():
     #     .build() \
     #     .build() \
     #     .build()
-    # simulator.generate_genesis(filename='simple_simulation')
+    # simulator.generate_genesis()
     # simulator.initialize_clients()
     # simulator.start_simulation()
 
@@ -107,7 +107,7 @@ def main():
     #simulator.generate_genesis(filename='8_8192_minimal')
     #simulator.initialize_clients()
     #simulator.start_simulation()
-    eth1blockhash = '0000000000000000000000000000000000000000000000000000000000000000'
+    eth1blockhash = bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000')
     #simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
     #    .set_end_time(9999999999999) \
     #    .set_custom_latency_map(None, modifier=lambda l: l // 2) \
@@ -119,7 +119,7 @@ def main():
     #    .build()
     #simulator.generate_genesis(filename='128_16384_mainnet')#
 
-    simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
+    simulator = SimulationBuilder('../../configs', 'mainnet', eth1blockhash) \
         .set_end_time(9999999999999) \
         .set_custom_latency_map(None, modifier=lambda l: l // 2) \
         .beacon_client(128) \
@@ -133,7 +133,7 @@ def main():
         .build() \
         .build() \
         .build()
-    simulator.generate_genesis(filename='129_135851_mainnet')
+    simulator.generate_genesis(filename='129_135851_mainnet', mocked=True)
     #simulator.initialize_clients()
     #simulator.start_simulation()
 
