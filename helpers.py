@@ -29,7 +29,7 @@ def queue_element_or_none(queue: Queue) -> Optional[Any]:
     except Empty:
         return None
 
-def process_mocked_deposit(spec, state, deposit) -> None:
+def process_mocked_deposit(spec, state, deposit, check_included=False) -> None:
     # --------------------------------
     # No check for valid merkle branch
     # --------------------------------
@@ -39,8 +39,8 @@ def process_mocked_deposit(spec, state, deposit) -> None:
 
     pubkey = deposit.data.pubkey
     amount = deposit.data.amount
-    validator_pubkeys = [v.pubkey for v in state.validators]
-    if pubkey not in validator_pubkeys:
+    validator_pubkeys = [v.pubkey for v in state.validators] if check_included else []
+    if not check_included or pubkey not in validator_pubkeys:
         # -------------------------
         # No signature verification
         # -------------------------
@@ -72,12 +72,17 @@ def initialize_beacon_state_from_mocked_eth1(spec,
 
     # Process deposits
     leaves = list(map(lambda deposit: deposit.data, deposits))
+    last_index = -1
     for index, deposit in enumerate(deposits):
         if index % 1000 == 0:
             print(f"[SIMULATOR][State] Deposit #{index}")
-        deposit_data_list = ssz_typing.List[spec.DepositData, 2**spec.DEPOSIT_CONTRACT_TREE_DEPTH](*leaves[:index + 1])
-        state.eth1_data.deposit_root = spec.hash_tree_root(deposit_data_list)
-        process_mocked_deposit(spec, state, deposit)
+        # ------------------------------------------------
+        # Calculate the deposit root only one time (below)
+        # ------------------------------------------------
+        process_mocked_deposit(spec, state, deposit, check_included=False)
+        last_index = index
+    deposit_data_list = ssz_typing.List[spec.DepositData, 2**spec.DEPOSIT_CONTRACT_TREE_DEPTH](*leaves[:last_index + 1])
+    state.eth1_data.deposit_root = spec.hash_tree_root(deposit_data_list)
 
     # Process activations
     for index, validator in enumerate(state.validators):

@@ -133,7 +133,7 @@ def main():
         .build() \
         .build() \
         .build()
-    simulator.generate_genesis(filename='129_135851_mainnet', mocked=True)
+    simulator.generate_genesis(filename='129_135851_mainnet_cheaply_mocked', mocked=True)
     #simulator.initialize_clients()
     #simulator.start_simulation()
 
