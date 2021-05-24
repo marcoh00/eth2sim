@@ -51,7 +51,7 @@ def main():
     .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
     .beacon_client(1)\
         .set_debug(True)\
-        .set_mode('BlockSlashing')\
+        .set_mode('AttesterSlashingTooLow')\
         .validators(32)\
         .build()\
     .build()\
