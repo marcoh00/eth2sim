@@ -45,6 +45,26 @@ def main():
     print(f'Eth1BlockHash for Genesis Block: {args.eth1blockhash.hex()}')
     print(f'Cryptographic Keys: {args.cryptokeys}')
 
+    eth1blockhash = bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000')
+    simulator = SimulationBuilder('../../configs', 'minimal', eth1blockhash)\
+    .set_end_time(calc_simtime(slot=1, epoch=8))\
+    .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
+    .beacon_client(1)\
+        .set_debug(True)\
+        .set_mode('BlockSlashing')\
+        .validators(32)\
+        .build()\
+    .build()\
+    .beacon_client(7)\
+        .set_debug(True)\
+        .validators(32)\
+        .build()\
+    .build()\
+    .build()
+    simulator.generate_genesis(filename='256_8_proposerslashing')
+    simulator.initialize_clients()
+    simulator.start_simulation()
+
     # simulator = SimulationBuilder(args.configpath, args.configname, args.eth1blockhash)\
     #     .set_end_time(calc_simtime(3, 2, 4))\
     #     .add_graph_output(3, calc_simtime(1, 1, 2), False)\
@@ -107,7 +127,7 @@ def main():
     #simulator.generate_genesis(filename='8_8192_minimal')
     #simulator.initialize_clients()
     #simulator.start_simulation()
-    eth1blockhash = bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000')
+    
     #simulator = SimulationBuilder('../../configs', 'mainnet', args.eth1blockhash) \
     #    .set_end_time(9999999999999) \
     #    .set_custom_latency_map(None, modifier=lambda l: l // 2) \
@@ -119,23 +139,23 @@ def main():
     #    .build()
     #simulator.generate_genesis(filename='128_16384_mainnet')#
 
-    simulator = SimulationBuilder('../../configs', 'mainnet', eth1blockhash) \
-        .set_end_time(9999999999999) \
-        .set_custom_latency_map(None, modifier=lambda l: l // 2) \
-        .beacon_client(128) \
-        .set_debug(True) \
-        .validators(1061) \
-        .build()\
-        .build()\
-        .beacon_client(1) \
-        .set_debug(True) \
-        .validators(43) \
-        .build() \
-        .build() \
-        .build()
-    simulator.generate_genesis(filename='129_135851_mainnet_cheaply_mocked', mocked=True)
-    #simulator.initialize_clients()
-    #simulator.start_simulation()
+    # simulator = SimulationBuilder('../../configs', 'mainnet', eth1blockhash) \
+    #     .set_end_time(9999999999999) \
+    #     .set_custom_latency_map(None, modifier=lambda l: l // 2) \
+    #     .beacon_client(128) \
+    #     .set_debug(True) \
+    #     .validators(1061) \
+    #     .build()\
+    #     .build()\
+    #     .beacon_client(1) \
+    #     .set_debug(True) \
+    #     .validators(43) \
+    #     .build() \
+    #     .build() \
+    #     .build()
+    # simulator.generate_genesis(filename='129_135851_mainnet_cheaply_mocked', mocked=True)
+    # #simulator.initialize_clients()
+    # #simulator.start_simulation()
 
 
 if __name__ == '__main__':

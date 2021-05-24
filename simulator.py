@@ -9,7 +9,8 @@ from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 import eth2spec.phase0.spec as spec
-from beaconclient import BeaconClient, BeaconClientBuilder
+from beaconclient import BeaconClient
+from beaconclient_builder import BeaconClientBuilder
 from builder import Builder
 from eth2spec.phase0 import spec
 from eth2spec.test.helpers.deposits import build_deposit, build_deposit_data

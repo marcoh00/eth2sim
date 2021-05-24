@@ -174,6 +174,45 @@ def simulation11(config, blockhash):
         .build()\
         .build()
 
+def simulation12(config, blockhash):
+    return SimulationBuilder('../../configs', config, blockhash)\
+        .set_end_time(calc_simtime(slot=1, epoch=8))\
+        .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
+        .beacon_client(1)\
+            .set_debug(True)\
+            .set_mode('BlockSlashing')\
+            .validators(32)\
+            .build()\
+        .build()\
+        .beacon_client(7)\
+            .set_debug(True)\
+            .validators(32)\
+            .build()\
+        .build()\
+    .build()
+
+def simulation13(config, blockhash):
+    return SimulationBuilder('../../configs', config, blockhash)\
+        .set_end_time(calc_simtime(slot=1, epoch=8))\
+        .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
+        .beacon_client(1)\
+            .set_debug(True)\
+            .set_mode('AttesterSlashingTooLow')\
+            .validators(32)\
+            .build()\
+        .build()\
+        .beacon_client(1)\
+            .set_debug(True)\
+            .set_mode('AttesterSlashingWithinSpan')\
+            .validators(32)\
+            .build()\
+        .beacon_client(6)\
+            .set_debug(True)\
+            .validators(32)\
+            .build()\
+        .build()\
+    .build()
+
 def main():
     # 0 minimal 
     simtype = int(sys.argv[1])
@@ -190,7 +229,9 @@ def main():
         8:  ('mainnet', simulation8), # mainnet, 4/13581
         9:  ('mainnet', simulation9), # mainnet, 256/13581
         10: ('minimal', simulation10), # latency, 256/8192
-        11: ('mainnet', simulation11)  # latency, 256/16384
+        11: ('mainnet', simulation11), # latency, 256/16384
+        12: ('minimal', simulation12), # proposer slashing
+        13: ('minimal', simulation13) # attester slashings
     }
     mocked = simtype > 2
     mocked_filename = "mocked_" if mocked else ""

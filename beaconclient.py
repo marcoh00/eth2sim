@@ -19,7 +19,6 @@ from remerkleable.bitfields import Bitlist
 from remerkleable.complex import Container
 
 import eth2spec.phase0.spec as spec
-from builder import Builder
 from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
@@ -87,6 +86,7 @@ class BeaconClient(Process):
         self.profile = profile
         self.slashings = {'proposer': [], 'attester': []}
         self.starttime = int(time.time())
+        self.proposer_current_slot = None
         self.build_validators()
 
     def __debug(self, obj, typ: str):
@@ -387,15 +387,17 @@ class BeaconClient(Process):
             spec.process_slots(head_state, spec.Slot(message.slot))
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
         indexed_validators = {validator.index: validator for validator in self.validators}
-        if self.proposer_current_slot in indexed_validators and not self.__slashed(self.proposer_current_slot):
+        if self.proposer_current_slot in indexed_validators and not self.slashed(self.proposer_current_slot):
             # Propose block if needed
             self.propose_block(indexed_validators[self.proposer_current_slot], head_state)
-            if message.slot == 4:
-                print('YOLO')
-                self.propose_block(indexed_validators[self.proposer_current_slot], head_state, True)
         self.handle_statistics_event(
             ProduceStatisticsEvent(time=self.current_time, priority=0, toidx=None, print_event=False)
         )
+
+        self.post_next_slot_event(head_state, indexed_validators)
+    
+    def post_next_slot_event(self, head_state, indexed_validators):
+        pass
 
     def handle_latest_voting_opportunity(self, message: LatestVoteOpportunity):
         if self.slot_last_attested is None or self.slot_last_attested < message.slot:
@@ -612,7 +614,7 @@ class BeaconClient(Process):
         self.head_root = spec.get_head(self.store)
         self.state = self.store.block_states[self.head_root]
 
-    def __slashed(self, validator: Optional[spec.ValidatorIndex] = None) -> bool:
+    def slashed(self, validator: Optional[spec.ValidatorIndex] = None) -> bool:
         if self.state.validators[validator].slashed:
             print(f'[BEACON CLIENT {self.counter}] Excluding Validator {validator} beacuse of slashing')
         return self.state.validators[validator].slashed
@@ -623,7 +625,7 @@ class BeaconClient(Process):
         attesting_validators: Dict[spec.ValidatorIndex, Validator] = {validator.index: validator
                                                                       for validator in self.validators
                                                                       if validator.index in attesting_indices
-                                                                      and not self.__slashed(validator.index)}
+                                                                      and not self.slashed(validator.index)}
         return attesting_validators
 
     def __validators_by_index(self) -> Dict[spec.ValidatorIndex, Validator]:
@@ -787,78 +789,3 @@ def get_orphans(store: spec.Store) -> Sequence[Tuple[str, int]]:
                  for root, block in store.blocks.items()
                  if block.parent_root not in store.blocks)
 
-
-class BeaconClientBuilder(Builder):
-    configpath: str
-    configname: str
-
-    debug: bool
-    debugfile: Optional[str]
-    profile: bool
-
-    validators_count: int
-    validator_builders: List[ValidatorBuilder]
-
-    neccessary_info_set: bool
-    validator_start_at: int
-    recv_queue: JoinableQueue
-    send_queue: Queue
-    mode: str
-
-    def __init__(self, configpath, configname, parent_builder=None,):
-        super(BeaconClientBuilder, self).__init__(parent_builder)
-        self.validator_builders = []
-        self.configpath = configpath
-        self.configname = configname
-        self.debug = False
-        self.debugfile = None
-        self.profile = False
-        self.mode = 'HONEST'
-        self.neccessary_info_set = False
-        self.validator_start_at = 0
-        self.simulator_to_client_queue = JoinableQueue()
-        self.client_to_simulator_queue = Queue()
-
-    def build_impl(self, counter):
-        if not self.neccessary_info_set:
-            raise ValueError('Need to specify queues and validator start index')
-        if self.mode not in ('HONEST',):
-            raise ValueError(f'Unknown mode: {self.mode}')
-
-        if self.mode == 'HONEST':
-            return BeaconClient(
-                counter=counter,
-                simulator_to_client_queue=self.simulator_to_client_queue,
-                client_to_simulator_queue=self.client_to_simulator_queue,
-                configpath=self.configpath,
-                configname=self.configname,
-                validator_builders=self.validator_builders,
-                validator_first_counter=self.validator_start_at,
-                debug=self.debug,
-                profile=self.profile
-            )
-
-    def register(self, child_builder: ValidatorBuilder):
-        child_builder.validators_count = int(self.validators_count)
-        self.validator_builders.append(child_builder)
-
-    def set_debug(self, flag=False):
-        self.debug = flag
-        return self
-
-    def set_profile(self, flag=False):
-        self.profile = flag
-        return self
-
-    def set_mode(self, mode):
-        self.mode = mode
-        return self
-
-    def validators(self, count):
-        self.validators_count = count
-        return ValidatorBuilder(parent_builder=self)
-
-    def neccessary_information(self, validator_start_at, client_to_simulator_queue):
-        self.neccessary_info_set = True
-        self.validator_start_at = validator_start_at
-        self.client_to_simulator_queue = client_to_simulator_queue
