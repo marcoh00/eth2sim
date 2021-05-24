@@ -143,7 +143,7 @@ class Simulator:
 
         if filename is not None:
             print('[SIMULATOR] Export Genesis State and Block to file')
-            mocked = "_mocked_" if mocked else ""
+            mocked = "mocked_" if mocked else ""
             state_file = f"state_{mocked}{filename}.ssz"
             block_file = f"block_{mocked}{filename}.ssz"
             with open(state_file, 'wb') as fp:
@@ -235,7 +235,7 @@ class Simulator:
 
     def __recv_message_event(self, event: MessageEvent):
         if event.message_type == 'SignedBeaconBlock':
-            print(f"[{simtime(self.start_time)}] Block Message {id(event)} by Beacon Client {event.fromidx}")
+            print(f"[{int(datetime.datetime.now().timestamp())}] Block Message {id(event)} by Beacon Client {event.fromidx}")
         if event.toidx is not None:
             self.network.delay(event)
             self.events.put(event)
