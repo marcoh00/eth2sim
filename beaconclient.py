@@ -265,8 +265,8 @@ class BeaconClient(Process):
                 min_slot_to_include,
                 max_slot_to_include
             )
-            if attestation.data.target.epoch != spec.get_current_epoch(self.state)
-            or self.state.current_justified_checkpoint == attestation.data.source
+            if attestation.data.target.epoch != spec.get_current_epoch(head_state)
+            or head_state.current_justified_checkpoint == attestation.data.source
         )
         block = spec.BeaconBlock(
             slot=head_state.slot,

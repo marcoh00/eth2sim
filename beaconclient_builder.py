@@ -1,4 +1,4 @@
-from slashingbeaconclient import AttesterSlashingTooLowClient, BlockSlashingBeaconClient
+from slashingbeaconclient import AttesterSlashingSameHeightClient, AttesterSlashingWithinSpan, BlockSlashingBeaconClient
 from beaconclient import BeaconClient
 from multiprocessing import JoinableQueue, Queue
 from typing import List, Optional
@@ -40,7 +40,7 @@ class BeaconClientBuilder(Builder):
     def build_impl(self, counter):
         if not self.neccessary_info_set:
             raise ValueError('Need to specify queues and validator start index')
-        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingTooLow'):
+        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan'):
             raise ValueError(f'Unknown mode: {self.mode}')
 
         if self.mode == 'HONEST':
@@ -68,9 +68,22 @@ class BeaconClientBuilder(Builder):
                 debug=self.debug,
                 profile=self.profile
             )
-        elif self.mode == 'AttesterSlashingTooLow':
+        elif self.mode == 'AttesterSlashingSameHeight':
             print('CONSTRUCT ATTESTER SLASHER W/ TOO LOW ATTESTATIONS')
-            return AttesterSlashingTooLowClient(
+            return AttesterSlashingSameHeightClient(
+                counter=counter,
+                simulator_to_client_queue=self.simulator_to_client_queue,
+                client_to_simulator_queue=self.client_to_simulator_queue,
+                configpath=self.configpath,
+                configname=self.configname,
+                validator_builders=self.validator_builders,
+                validator_first_counter=self.validator_start_at,
+                debug=self.debug,
+                profile=self.profile
+            )
+        elif self.mode == 'AttesterSlashingWithinSpan':
+            print('CONSTRUCT ATTESTER SLASHER W/ ATTESTATIONS WITHIN SPAN')
+            return AttesterSlashingWithinSpan(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,
