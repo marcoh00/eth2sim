@@ -57,9 +57,9 @@ def simulation2(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(256)\
+        .beacon_client(128)\
             .set_debug(True)\
-            .validators(1)\
+            .validators(2)\
             .build()\
         .build()\
         .build()
@@ -95,9 +95,9 @@ def simulation5(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(256)\
+        .beacon_client(128)\
             .set_debug(True)\
-            .validators(32)\
+            .validators(64)\
             .build()\
         .build()\
         .build()
@@ -115,9 +115,9 @@ def simulation6(config, blockhash):
 def simulation7(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(256)\
+        .beacon_client(128)\
             .set_debug(True)\
-            .validators(64)\
+            .validators(128)\
             .build()\
         .build()\
         .build()
@@ -140,14 +140,14 @@ def simulation8(config, blockhash):
 def simulation9(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(255)\
+        .beacon_client(127)\
             .set_debug(True)\
-            .validators(531)\
+            .validators(1061)\
             .build()\
         .build()\
         .beacon_client(1)\
             .set_debug(True)\
-            .validators(446)\
+            .validators(1104)\
             .build()\
         .build()\
         .build()
@@ -156,9 +156,9 @@ def simulation10(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 2)\
-        .beacon_client(256)\
+        .beacon_client(128)\
             .set_debug(True)\
-            .validators(32)\
+            .validators(64)\
             .build()\
         .build()\
         .build()
