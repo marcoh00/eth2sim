@@ -76,7 +76,7 @@ class AttestationCache:
         yield from self.filter_attestations(min_slot, max_slot, lambda a: not a.known_to_forkchoice)
 
     def attestations_not_seen_in_block(self, min_slot: spec.Slot, max_slot: spec.Slot) -> Iterable[spec.Attestation]:
-        yield from self.filter_attestations(min_slot, max_slot, lambda a: not a.seen_in_block)
+        yield from self.filter_attestations(min_slot, max_slot, lambda a: not a.seen_in_block and a.known_to_forkchoice)
 
     def filter_attestations(self, min_slot: spec.Slot, max_slot: spec.Slot, filter_func) -> Iterable[spec.Attestation]:
         for slot in self.cache_by_time.keys():
@@ -120,6 +120,7 @@ class AttestationCache:
 
     def __search_slashings(self, state: spec.BeaconState, validator: spec.ValidatorIndex)\
             -> Iterable[spec.AttesterSlashing]:
+        slashed_validators = []
         for i in range(len(self.cache_by_validator[validator])):
             for j in range(i, len(self.cache_by_validator[validator])):
                 attestation1 = self.cache_by_validator[validator][i]
@@ -128,11 +129,26 @@ class AttestationCache:
                     attestation1.attestation.data,
                     attestation2.attestation.data
                 ):
-                    if not state.validators[validator].slashed:
+                    if not state.validators[validator].slashed and validator not in slashed_validators:
+                        indexed_1 = attestation1.into_indexed_attestation()
+                        indexed_2 = attestation2.into_indexed_attestation()
                         yield spec.AttesterSlashing(
-                            attestation1=attestation1.into_indexed_attestation(),
-                            attestation2=attestation2.into_indexed_attestation()
+                            attestation_1=indexed_1,
+                            attestation_2=indexed_2
                         )
+                        slashed_validators += set(indexed_1.attesting_indices).intersection(indexed_2.attesting_indices)
+                elif spec.is_slashable_attestation_data(
+                    attestation2.attestation.data,
+                    attestation1.attestation.data
+                ):
+                    if not state.validators[validator].slashed and validator not in slashed_validators:
+                        indexed_1 = attestation1.into_indexed_attestation()
+                        indexed_2 = attestation2.into_indexed_attestation()
+                        yield spec.AttesterSlashing(
+                            attestation_1=indexed_2,
+                            attestation_2=indexed_1
+                        )
+                        slashed_validators += set(indexed_1.attesting_indices).intersection(indexed_2.attesting_indices)
 
     def __find_attestaion(self, attestation: spec.Attestation) -> Optional[CachedAttestation]:
         slot, committee = attestation.data.slot, attestation.data.index

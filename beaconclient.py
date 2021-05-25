@@ -265,8 +265,8 @@ class BeaconClient(Process):
                 min_slot_to_include,
                 max_slot_to_include
             )
-            if attestation.data.target.epoch != spec.get_current_epoch(self.state)
-            or self.state.current_justified_checkpoint == attestation.data.source
+            if attestation.data.target.epoch != spec.get_current_epoch(head_state)
+            or head_state.current_justified_checkpoint == attestation.data.source
         )
         block = spec.BeaconBlock(
             slot=head_state.slot,
@@ -326,12 +326,15 @@ class BeaconClient(Process):
         try:
             new_state_root = spec.compute_new_state_root(self.state, block)
         except AssertionError:
+            validator_status = [str(validator) for validator in self.state.validators if validator.slashed]
+            print(validator_status)
+            print(block)
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb)
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            self.__debug(text, 'FindNewStateRootError')
-            self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=0))
+            self.__debug({'text': text, 'block': str(block)}, 'FindNewStateRootError')
+            self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=0, message=text))
             return
         block.state_root = new_state_root
         signed_block = spec.SignedBeaconBlock(
@@ -377,8 +380,12 @@ class BeaconClient(Process):
                     spec.on_attestation(self.store, attestation)
                     self.attestation_cache.accept_attestation(attestation, forkchoice=True)
             except AssertionError:
+                _, _, tb = sys.exc_info()
+                traceback.print_tb(tb)
+                tb_info = traceback.extract_tb(tb)
+                filename, line, func, text = tb_info[-1]
                 print(f'[BEACON CLIENT {self.counter}] Could not validate attestation')
-                self.__debug(attestation, 'ValidateAttestationOnSlotBoundaryError')
+                self.__debug({'line': line, 'text': text, 'attestation': str(attestation)}, 'ValidateAttestationOnSlotBoundaryError')
 
         # Advance state for checking
         self.__compute_head()
@@ -572,13 +579,9 @@ class BeaconClient(Process):
             # 1: Index of the validator inside the committee
             # 2: Size of the committee
             validator_committee = self.committee[self.current_slot][validator_index][0]
-            attestation_data = spec.AttestationData(
-                slot=self.current_slot,
-                index=validator_committee,
-                beacon_block_root=spec.hash_tree_root(head_block),
-                source=head_state.current_justified_checkpoint,
-                target=spec.Checkpoint(epoch=spec.get_current_epoch(head_state), root=epoch_boundary_block_root)
-            )
+            attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state)
+            if attestation_data is None:
+                continue
 
             aggregation_bits_list = list(
                 0 for _ in range(self.committee[self.current_slot][validator_index][2])
@@ -609,6 +612,15 @@ class BeaconClient(Process):
             self.client_to_simulator_queue.put(message)
             self.__debug(message.marker, 'AttestationMessageSent')
             self.__debug(attestation, 'AttestationSend')
+    
+    def produce_attestation_data(self, validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state) -> Optional[spec.AttestationData]:
+        return spec.AttestationData(
+                slot=self.current_slot,
+                index=validator_committee,
+                beacon_block_root=spec.hash_tree_root(head_block),
+                source=head_state.current_justified_checkpoint,
+                target=spec.Checkpoint(epoch=spec.get_current_epoch(head_state), root=epoch_boundary_block_root)
+            )
 
     def __compute_head(self):
         self.head_root = spec.get_head(self.store)
