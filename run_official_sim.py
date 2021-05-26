@@ -115,9 +115,9 @@ def simulation6(config, blockhash):
 def simulation7(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(32)\
+        .beacon_client(8)\
             .set_debug(True)\
-            .validators(512)\
+            .validators(2048)\
             .build()\
         .build()\
         .build()
@@ -127,12 +127,12 @@ def simulation8(config, blockhash):
         .set_end_time(1844674407370955161)\
         .beacon_client(3)\
             .set_debug(True)\
-            .validators(33962)\
+            .validators(33963)\
             .build()\
         .build()\
         .beacon_client(1)\
             .set_debug(True)\
-            .validators(33965)\
+            .validators(33962)\
             .build()\
         .build()\
         .build()
@@ -155,10 +155,10 @@ def simulation9(config, blockhash):
 def simulation10(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .set_custom_latency_map(None, modifier=lambda latency: latency * 2)\
+        .set_custom_latency_map(None, modifier=lambda latency: latency * 4)\
         .beacon_client(128)\
             .set_debug(True)\
-            .validators(64)\
+            .validators(2)\
             .build()\
         .build()\
         .build()
@@ -166,10 +166,10 @@ def simulation10(config, blockhash):
 def simulation11(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .set_custom_latency_map(None, modifier=lambda latency: latency * 4)\
-        .beacon_client(256)\
+        .set_custom_latency_map(None, modifier=lambda latency: latency * 8)\
+        .beacon_client(128)\
             .set_debug(True)\
-            .validators(64)\
+            .validators(2)\
             .build()\
         .build()\
         .build()
@@ -220,16 +220,16 @@ def main():
     configmap = {
         0:  ('minimal', simulation0), # minimal 4/256
         1:  ('minimal', simulation1), # minimal, 12/256
-        2:  ('minimal', simulation2), # minimal, 256/256
+        2:  ('minimal', simulation2), # minimal, 128/256
         3:  ('minimal', simulation3), # minimal, 4/8192
         4:  ('minimal', simulation4), # minimal, 12/8192
-        5:  ('minimal', simulation5), # minimal, 256/8192
+        5:  ('minimal', simulation5), # minimal, 128/8192
         6:  ('mainnet', simulation6), # mainnet, 4/16384
-        7:  ('mainnet', simulation7), # mainnet, 256/16384
+        7:  ('mainnet', simulation7), # mainnet, 8/16384
         8:  ('mainnet', simulation8), # mainnet, 4/13581
-        9:  ('mainnet', simulation9), # mainnet, 256/13581
-        10: ('minimal', simulation10), # latency, 256/8192
-        11: ('mainnet', simulation11), # latency, 256/16384
+        9:  ('mainnet', simulation9), # mainnet, 8/13581
+        10: ('minimal', simulation10), # latency, 128/256
+        11: ('mainnet-minimized', simulation11), # latency, 128/256
         12: ('minimal', simulation12), # proposer slashing
         13: ('minimal', simulation13) # attester slashings
     }
