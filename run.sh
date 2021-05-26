@@ -28,32 +28,32 @@ mv *.json *.prof *.gv *.pdf old
 
 
 
-sleep 10
-python3 -u run_official_sim.py 2 > 2.out 2> 2.err &
-sleep 10
-python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat2.json 1
-killall -9 python3
-mkdir -p 2
-mv *.json *.gv *.pdf *.out *.err *.prof 2
+# sleep 10
+# python3 -u run_official_sim.py 2 > 2.out 2> 2.err &
+# sleep 10
+# python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat2.json 1
+# killall -9 python3
+# mkdir -p 2
+# mv *.json *.gv *.pdf *.out *.err *.prof 2
 
 
-sleep 10
-python3 -u run_official_sim.py 3 > 3.out 2> 3.err &
-sleep 10
-python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat3.json 1
-killall -9 python3
-mkdir -p 3
-mv *.json *.gv *.pdf *.out *.err *.prof 3
+# sleep 10
+# python3 -u run_official_sim.py 3 > 3.out 2> 3.err &
+# sleep 10
+# python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat3.json 1
+# killall -9 python3
+# mkdir -p 3
+# mv *.json *.gv *.pdf *.out *.err *.prof 3
 
 
 
-sleep 10
-python3 -u run_official_sim.py 4 > 4.out 2> 4.err &
-sleep 10
-python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat4.json 1
-killall -9 python3
-mkdir -p 4
-mv *.json *.gv *.pdf *.out *.err *.prof 4
+# sleep 10
+# python3 -u run_official_sim.py 4 > 4.out 2> 4.err &
+# sleep 10
+# python /home/marco/Dokumente_git/masterarbeit/code/pidstat_parse.py python3 14400 1 pidstat4.json 1
+# killall -9 python3
+# mkdir -p 4
+# mv *.json *.gv *.pdf *.out *.err *.prof 4
 
 
 
