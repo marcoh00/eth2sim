@@ -57,7 +57,7 @@ def main():
     orphans = len(data[-1]['orphans']) - 1
     balance_validator_min = min(data[-1]['balances'].values())
     balance_validator_max = max(data[-1]['balances'].values())
-    balance_validator_mean = sum(data[-1]['balances'].values()) / sum(data[-1]['balances'].values())
+    balance_validator_mean = sum(data[-1]['balances'].values()) / len(data[-1]['balances'].values())
     attester_slashings = len(data[-1]['attester_slashings'])
     proposer_slashings = len(data[-1]['proposer_slashings'])
 
