@@ -115,9 +115,9 @@ def simulation6(config, blockhash):
 def simulation7(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(128)\
+        .beacon_client(32)\
             .set_debug(True)\
-            .validators(128)\
+            .validators(512)\
             .build()\
         .build()\
         .build()
@@ -140,14 +140,14 @@ def simulation8(config, blockhash):
 def simulation9(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(127)\
+        .beacon_client(15)\
             .set_debug(True)\
-            .validators(1061)\
+            .validators(8491)\
             .build()\
         .build()\
         .beacon_client(1)\
             .set_debug(True)\
-            .validators(1104)\
+            .validators(8486)\
             .build()\
         .build()\
         .build()
