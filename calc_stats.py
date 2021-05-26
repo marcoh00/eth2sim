@@ -47,9 +47,9 @@ def main():
         data = json.load(fp)
     
     slots_per_hour = calc_slots_h(data, runtime_h)
-    mean_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: (old + new) / 2, aggregator=lambda values: sum((value - 1 for value in values)) / len(values), filter=lambda epoch, value: epoch > 2)
-    max_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: max(old, new), aggregator=lambda values: max((value - 1 for value in values)), filter=lambda epoch, value: epoch > 2)
-    min_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: min(old, new), aggregator=lambda values: min((value - 1 for value in values)), filter=lambda epoch, value: epoch > 2)
+    mean_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: (old + new) / 2, aggregator=lambda values: (sum((value - 1 for value in values)) / len(values)) if len(values) > 0 else '-', filter=lambda epoch, value: epoch > 2)
+    max_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: max(old, new), aggregator=lambda values: (max((value - 1 for value in values))) if len(values) > 0 else '-', filter=lambda epoch, value: epoch > 2)
+    min_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: min(old, new), aggregator=lambda values: (min((value - 1 for value in values))) if len(values) > 0 else '-', filter=lambda epoch, value: epoch > 2)
     forks_total = len(data[-1]['leafs']) - 1
     forks_d = (24 / runtime_h) * forks_total
     stales = forks_total
