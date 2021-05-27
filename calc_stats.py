@@ -39,9 +39,11 @@ def collect_by_epoch(data, valuegetter, drawdecision=None, aggregator=None, filt
     
 
 def main():
-    # usage: infile runtime[h]
+    # usage: infile runtime[h] slottime[s]
     infile = sys.argv[1]
     runtime_h = float(sys.argv[2])
+    slottime_s = int(sys.argv[3])
+
     data = []
     with open(infile, 'r', encoding='utf-8') as fp:
         data = json.load(fp)
@@ -51,7 +53,8 @@ def main():
     max_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: max(old, new), aggregator=lambda values: (max((value - 1 for value in values))) if len(values) > 0 else '-', filter=lambda epoch, value: epoch > 2)
     min_finality_delay = collect_by_epoch(data, lambda o: o['finality_delay'], lambda old, new: min(old, new), aggregator=lambda values: (min((value - 1 for value in values))) if len(values) > 0 else '-', filter=lambda epoch, value: epoch > 2)
     forks_total = len(data[-1]['leafs']) - 1
-    forks_d = (24 / runtime_h) * forks_total
+    # Slots simulated / Slots per day
+    forks_d = (((24 * 60 * 60) / slottime_s) * forks_total) / data[-1]['current_slot']
     stales = forks_total
     print("WARNING! STALES: CHECK FOR LONGER FORKS THAN 1 MANUALLY BY INSPECTING THE GRAPH!!!")
     orphans = len(data[-1]['orphans']) - 1
