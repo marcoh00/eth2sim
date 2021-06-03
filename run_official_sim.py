@@ -140,14 +140,14 @@ def simulation8(config, blockhash):
 def simulation9(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(15)\
+        .beacon_client(7)\
             .set_debug(True)\
-            .validators(8491)\
+            .validators(16981)\
             .build()\
         .build()\
         .beacon_client(1)\
             .set_debug(True)\
-            .validators(8486)\
+            .validators(16984)\
             .build()\
         .build()\
         .build()

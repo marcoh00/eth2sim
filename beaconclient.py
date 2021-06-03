@@ -393,15 +393,14 @@ class BeaconClient(Process):
         if head_state.slot < message.slot:
             spec.process_slots(head_state, spec.Slot(message.slot))
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
-        indexed_validators = {validator.index: validator for validator in self.validators}
-        if self.proposer_current_slot in indexed_validators and not self.slashed(self.proposer_current_slot):
+        
+        if self.proposer_current_slot in self.indexed_validators and not self.slashed(self.proposer_current_slot):
             # Propose block if needed
-            self.propose_block(indexed_validators[self.proposer_current_slot], head_state)
+            self.propose_block(self.indexed_validators[self.proposer_current_slot], head_state)
         self.handle_statistics_event(
             ProduceStatisticsEvent(time=self.current_time, priority=0, toidx=None, print_event=False)
         )
-
-        self.post_next_slot_event(head_state, indexed_validators)
+        self.post_next_slot_event(head_state, self.indexed_validators)
     
     def post_next_slot_event(self, head_state, indexed_validators):
         pass
@@ -708,6 +707,7 @@ class BeaconClient(Process):
         for builder in self.validator_builders:
             for _ in range(0, builder.validators_count):
                 self.validators.append(builder.build(False, self.validator_first_counter + len(self.validators)))
+        self.indexed_validators = {validator.index: validator for validator in self.validators}
 
 
 # Statistics
@@ -732,6 +732,7 @@ class Statistics:
     proposer_slashings: Sequence[int]
     finality_delay: int
     validators_left: Sequence[Tuple[spec.ValidatorIndex, int]]
+    current_base_reward: spec.Gwei
     balances: Dict[int, int]
 
 
@@ -763,6 +764,7 @@ def statistics(client: BeaconClient) -> Statistics:
         validators_left=tuple((spec.ValidatorIndex(v[0]), v[1].exit_epoch)
                               for v in enumerate(client.state.validators)
                               if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH),
+        current_base_reward=spec.get_base_reward(client.state, spec.ValidatorIndex(0)),
         balances={index: client.state.balances[index]
                   for index, _ in enumerate(client.state.validators)}
     )
