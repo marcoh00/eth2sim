@@ -47,17 +47,16 @@ def main():
 
     eth1blockhash = bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000')
     simulator = SimulationBuilder('../../configs', 'minimal', eth1blockhash)\
-    .set_end_time(calc_simtime(slot=1, epoch=8))\
+    .set_end_time(calc_simtime(slot=1, epoch=16))\
     .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
     .beacon_client(1)\
         .set_debug(True)\
-        .set_mode('AttesterSlashingSameHeight')\
-        .validators(32)\
-        .build()\
-    .build()\
-    .beacon_client(1)\
-        .set_debug(True)\
-        .set_mode('AttesterSlashingWithinSpan')\
+        .set_mode('TimeAttacked')\
+        .set_attackinfo({
+            'attack_start_slot': spec.Slot(9),
+            'attack_end_slot': spec.Slot(32),
+            'timedelta': spec.Slot(64)
+        })\
         .validators(32)\
         .build()\
     .build()\
@@ -67,7 +66,7 @@ def main():
         .build()\
     .build()\
     .build()
-    simulator.generate_genesis(filename='256_8_proposerslashing')
+    simulator.generate_genesis()
     simulator.initialize_clients()
     simulator.start_simulation()
 

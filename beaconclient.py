@@ -359,10 +359,11 @@ class BeaconClient(Process):
 
     def handle_next_slot_event(self, message: NextSlotEvent):
         self.current_slot = spec.Slot(message.slot)
+        self.pre_next_slot_event(message)
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
 
         spec.on_tick(self.store, message.time)
-        if message.slot % spec.SLOTS_PER_EPOCH == 0:
+        if self.current_slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee(current_epoch)
 
         # Keep two epochs of past attestations
@@ -390,8 +391,8 @@ class BeaconClient(Process):
         # Advance state for checking
         self.__compute_head()
         head_state = self.state.copy()
-        if head_state.slot < message.slot:
-            spec.process_slots(head_state, spec.Slot(message.slot))
+        if head_state.slot < self.current_slot:
+            spec.process_slots(head_state, self.current_slot)
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
         
         if self.proposer_current_slot in self.indexed_validators and not self.slashed(self.proposer_current_slot):
@@ -402,6 +403,9 @@ class BeaconClient(Process):
         )
         self.post_next_slot_event(head_state, self.indexed_validators)
     
+    def pre_next_slot_event(self, message: NextSlotEvent):
+        pass
+
     def post_next_slot_event(self, head_state, indexed_validators):
         pass
 

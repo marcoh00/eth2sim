@@ -1,7 +1,8 @@
+from attackingbeaconclient import TimeAttackedBeaconClient
 from slashingbeaconclient import AttesterSlashingSameHeightClient, AttesterSlashingWithinSpan, BlockSlashingBeaconClient
 from beaconclient import BeaconClient
 from multiprocessing import JoinableQueue, Queue
-from typing import List, Optional
+from typing import Dict, List, Optional
 from validator import ValidatorBuilder
 from builder import Builder
 
@@ -23,6 +24,8 @@ class BeaconClientBuilder(Builder):
     send_queue: Queue
     mode: str
 
+    attackinfo: Dict
+
     def __init__(self, configpath, configname, parent_builder=None,):
         super(BeaconClientBuilder, self).__init__(parent_builder)
         self.validator_builders = []
@@ -36,11 +39,12 @@ class BeaconClientBuilder(Builder):
         self.validator_start_at = 0
         self.simulator_to_client_queue = JoinableQueue()
         self.client_to_simulator_queue = Queue()
+        self.attackinfo = None
 
     def build_impl(self, counter):
         if not self.neccessary_info_set:
             raise ValueError('Need to specify queues and validator start index')
-        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan'):
+        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan', 'TimeAttacked'):
             raise ValueError(f'Unknown mode: {self.mode}')
 
         if self.mode == 'HONEST':
@@ -94,6 +98,21 @@ class BeaconClientBuilder(Builder):
                 debug=self.debug,
                 profile=self.profile
             )
+        elif self.mode == 'TimeAttacked':
+            print('CONSTRUCT TIME ATTACKED')
+            assert self.attackinfo is not None
+            return TimeAttackedBeaconClient(
+                counter=counter,
+                simulator_to_client_queue=self.simulator_to_client_queue,
+                client_to_simulator_queue=self.client_to_simulator_queue,
+                configpath=self.configpath,
+                configname=self.configname,
+                validator_builders=self.validator_builders,
+                validator_first_counter=self.validator_start_at,
+                debug=self.debug,
+                profile=self.profile,
+                **self.attackinfo
+            )
 
     def register(self, child_builder: ValidatorBuilder):
         child_builder.validators_count = int(self.validators_count)
@@ -109,6 +128,10 @@ class BeaconClientBuilder(Builder):
 
     def set_mode(self, mode):
         self.mode = mode
+        return self
+    
+    def set_attackinfo(self, attackinfo):
+        self.attackinfo = attackinfo
         return self
 
     def validators(self, count):
