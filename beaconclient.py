@@ -155,7 +155,11 @@ class BeaconClient(Process):
             ProduceGraphEvent: self.produce_graph_event
         }
         # noinspection PyArgumentList,PyTypeChecker
+        self.pre_event_handling(event)
         actions[type(event)](event)
+    
+    def pre_event_handling(self, event: Event):
+        pass
 
     def __handle_message_event(self, event: MessageEvent):
         decoder = {
@@ -361,7 +365,6 @@ class BeaconClient(Process):
         self.current_slot = spec.Slot(message.slot)
         self.pre_next_slot_event(message)
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
-
         spec.on_tick(self.store, message.time)
         if self.current_slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee(current_epoch)
@@ -496,8 +499,6 @@ class BeaconClient(Process):
         if len(old_chain) > 0:
             self.__debug(len(old_chain), 'OrphanedBlocksToHandle')
         for cblock in old_chain:
-            spec.on_block(self.store, cblock)
-            self.block_cache.accept_block(cblock)
             self.__process_block_contents(cblock)
 
         # Process the new block now
@@ -514,26 +515,30 @@ class BeaconClient(Process):
             chain = []
         self.__debug(len(chain), 'BlocksToHandle')
         for cblock in chain:
-            try:
-                spec.on_block(self.store, cblock)
-                self.block_cache.accept_block(cblock)
-                self.__process_block_contents(cblock)
-            except AssertionError:
+            self.__process_block_contents(cblock)
+
+    def __process_block_contents(self, block: spec.SignedBeaconBlock):
+        try:
+            if block.message.slot > self.current_slot:
+                    self.__debug(f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])", 'FutureBlockWarning')
+                    return
+            spec.on_block(self.store, block)
+            self.block_cache.accept_block(block)
+
+            for aslashing in block.message.body.attester_slashings:
+                self.__debug(aslashing, 'AttesterSlashing')
+                self.slashings['attester'].append(str(aslashing))
+            for pslashing in block.message.body.proposer_slashings:
+                self.__debug(pslashing, 'ProposerSlashing')
+                self.slashings['proposer'].append(str(pslashing))
+            for attestation in block.message.body.attestations:
+                self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
+        except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
                 print(f'[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
-
-    def __process_block_contents(self, block: spec.SignedBeaconBlock):
-        for aslashing in block.message.body.attester_slashings:
-            self.__debug(aslashing, 'AttesterSlashing')
-            self.slashings['attester'].append(str(aslashing))
-        for pslashing in block.message.body.proposer_slashings:
-            self.__debug(pslashing, 'ProposerSlashing')
-            self.slashings['proposer'].append(str(pslashing))
-        for attestation in block.message.body.attestations:
-            self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -568,6 +573,8 @@ class BeaconClient(Process):
             # Internally, the last seen block is copied and used as the block for every slot
             # up until the current slot.
             spec.process_slots(head_state, self.current_slot)
+        if self.debug:
+            self.graph(show=False)
 
         # As specified inside validator.md spec / Attesting / Note:
         start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
@@ -652,9 +659,10 @@ class BeaconClient(Process):
         return COLORS[validator % len(COLORS)]
 
     def graph(self, show=True):
-        g = Digraph('G', filename=f'graph_{int(time.time())}_{self.counter}.gv')
+        g = Digraph('G', filename=f'graph_{int(time.time())}_{self.counter}_{self.current_slot}.gv')
         blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
-        for root, block in self.store.blocks.items():
+        for root, block in self.block_cache.blocks.items():
+            block = block.message
             epoch = spec.compute_epoch_at_slot(block.slot)
             slot = block.slot
             if epoch not in blocks_by_slot_and_epoch:
@@ -708,10 +716,12 @@ class BeaconClient(Process):
 
     def build_validators(self):
         self.validators = list()
+        self.indexed_validators = dict()
         for builder in self.validator_builders:
             for _ in range(0, builder.validators_count):
-                self.validators.append(builder.build(False, self.validator_first_counter + len(self.validators)))
-        self.indexed_validators = {validator.index: validator for validator in self.validators}
+                validator: Validator = builder.build(False, self.validator_first_counter + len(self.validators))
+                self.validators.append(validator)
+                self.indexed_validators[validator.counter] = validator
 
 
 # Statistics

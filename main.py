@@ -47,22 +47,26 @@ def main():
 
     eth1blockhash = bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000')
     simulator = SimulationBuilder('../../configs', 'minimal', eth1blockhash)\
-    .set_end_time(calc_simtime(slot=1, epoch=16))\
+    .set_end_time(calc_simtime(slot=1, epoch=13))\
     .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
     .beacon_client(1)\
         .set_debug(True)\
         .set_mode('TimeAttacked')\
         .set_attackinfo({
-            'attack_start_slot': spec.Slot(9),
-            'attack_end_slot': spec.Slot(32),
-            'timedelta': spec.Slot(64)
+            'attack_start_slot': spec.Slot(8),
+            'attack_end_slot': spec.Slot(24),
+            'timedelta': spec.Slot(48)
         })\
-        .validators(32)\
+        .validators(1)\
         .build()\
     .build()\
-    .beacon_client(7)\
+    .beacon_client(1)\
         .set_debug(True)\
-        .validators(32)\
+        .validators(254)\
+        .build()\
+    .build()\
+    .beacon_client(1)\
+        .validators(1)\
         .build()\
     .build()\
     .build()

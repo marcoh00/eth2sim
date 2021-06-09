@@ -113,12 +113,12 @@ class AttestationCache:
 
     def search_slashings(self, state: spec.BeaconState, validator: Optional[spec.ValidatorIndex] = None):
         if validator is not None:
-            yield from self.__search_slashings(state, validator)
+            yield from self.int_search_slashings(state, validator)
         else:
             for validator in self.cache_by_validator.keys():
-                yield from self.__search_slashings(state, validator)
+                yield from self.int_search_slashings(state, validator)
 
-    def __search_slashings(self, state: spec.BeaconState, validator: spec.ValidatorIndex)\
+    def int_search_slashings(self, state: spec.BeaconState, validator: spec.ValidatorIndex)\
             -> Iterable[spec.AttesterSlashing]:
         slashed_validators = []
         for i in range(len(self.cache_by_validator[validator])):
@@ -299,15 +299,21 @@ class BlockCache:
             # raise ValueError('Second block at same height!')
 
     def search_slashings(self, state: spec.BeaconState) -> Iterable[spec.ProposerSlashing]:
-        for root1, root2 in self.slashable:
-            slashable_block = self.blocks[root1]
-            original_block = self.blocks[root2]
-            assert original_block.message.proposer_index == slashable_block.message.proposer_index
+        useless_roots = set()
+        for roots in self.slashable:
+            slashable_block = self.blocks[roots[0]]
+            original_block = self.blocks[roots[1]]
+            if original_block.message.proposer_index != slashable_block.message.proposer_index:
+                # Someone else proposed a block here. Looks like a long fork!
+                # While this is unfortunate, it is not slashable...
+                useless_roots.add(roots)
+                continue
 
             # Already slashed?
             proposer = slashable_block.message.proposer_index
             if not state.validators[proposer].slashed:
                 yield self.__produce_slashing(original_block, slashable_block)
+        self.slashable.difference_update(useless_roots)
 
     @staticmethod
     def __produce_slashing(block1: spec.SignedBeaconBlock,
