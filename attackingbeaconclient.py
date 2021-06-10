@@ -79,3 +79,9 @@ class TimeAttackedBeaconClient(BeaconClient):
         attestation = super().produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state)
         print(f"[BEACON CLIENT {self.counter}] Time-attacked client produces attestation: slot=[{attestation.slot}] srcep=[{attestation.source.epoch}] targetep=[{attestation.target.epoch}] validator=[{validator_index}]")
         return attestation
+    
+    def pre_attest(self):
+        self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
+    
+    def pre_propose(self):
+        self.update_committee(spec.compute_epoch_at_slot(self.current_slot))

@@ -225,14 +225,17 @@ def simulation14(config, blockhash):
 
 def simulation15(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
-        .set_end_time(calc_simtime(slot=1, epoch=14))\
+        .set_end_time(calc_simtime(slot=1, epoch=13))\
         .beacon_client(1)\
             .set_debug(True)\
             .set_mode('TimeAttacked')\
             .set_attackinfo({
-                'attack_start_slot': spec.Slot(32),
-                'attack_end_slot': spec.Slot(48),
-                'timedelta': spec.Slot(48)
+                #'attack_start_slot': spec.Slot(32),
+                #'attack_end_slot': spec.Slot(48),
+                #'timedelta': spec.Slot(40)
+                'attack_start_slot': spec.Slot(16),
+                'attack_end_slot': spec.Slot(32),
+                'timedelta': spec.Slot(40)
             })\
             .validators(32)\
             .build()\

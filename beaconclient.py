@@ -9,7 +9,7 @@ from multiprocessing import Queue, JoinableQueue
 from multiprocessing.context import Process
 import time
 from typing import Tuple, Optional, List, Dict, Sequence, Set
-
+import os
 from dataclasses import dataclass
 
 import dataclasses
@@ -115,6 +115,7 @@ class BeaconClient(Process):
             self.debugfile.flush()
 
     def run(self):
+        print(f"[BEACON CLIENT {self.counter}] started. PID is {os.getpid()}.")
         config_util.prepare_config(self.specconf[0], self.specconf[1])
         # noinspection PyTypeChecker
         reload(spec)
@@ -185,7 +186,7 @@ class BeaconClient(Process):
         }, 'MessageRecv')
         payload = decoder[event.message_type].decode_bytes(event.message)
         # noinspection PyArgumentList
-        actions[event.message_type](payload)
+        actions[event.message_type](payload, event.marker)
 
     def __handle_validator_initialization(self, event: ValidatorInitializationEvent):
         self.build_validators()
@@ -207,13 +208,13 @@ class BeaconClient(Process):
     def produce_graph_event(self, event: ProduceGraphEvent):
         self.graph(event.show)
 
-    def handle_genesis_state(self, state: spec.BeaconState):
+    def handle_genesis_state(self, state: spec.BeaconState, marker=None):
         print(f'[BEACON CLIENT {self.counter}] Initialize state from Genesis State')
         self.state = state
         for validator in self.validators:
             validator.index_from_state(state)
 
-    def handle_genesis_block(self, block: spec.BeaconBlock):
+    def handle_genesis_block(self, block: spec.BeaconBlock, marker=None):
         print(f'[BEACON CLIENT {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block')
         self.store = spec.get_forkchoice_store(self.state, block)
         self.block_cache = BlockCache(block)
@@ -366,8 +367,12 @@ class BeaconClient(Process):
         self.pre_next_slot_event(message)
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         spec.on_tick(self.store, message.time)
+        self.__compute_head()
         if self.current_slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee(current_epoch)
+
+        # Try to process queued attestations
+        self.attestation_cache.add_queued_attestations(self.store)
 
         # Keep two epochs of past attestations
         min_slot_to_keep = spec.compute_start_slot_at_epoch(
@@ -392,7 +397,7 @@ class BeaconClient(Process):
                 self.__debug({'line': line, 'text': text, 'attestation': str(attestation)}, 'ValidateAttestationOnSlotBoundaryError')
 
         # Advance state for checking
-        self.__compute_head()
+        
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:
             spec.process_slots(head_state, self.current_slot)
@@ -485,15 +490,15 @@ class BeaconClient(Process):
             self.__debug(send_message.marker, 'AggregateAndProofMessageSent')
             self.__debug(signed_aggregate_and_proof, 'AggregateAndProofSend')
 
-    def handle_attestation(self, attestation: spec.Attestation):
+    def handle_attestation(self, attestation: spec.Attestation, marker=None):
         self.__debug(attestation, 'AttestationRecv')
-        self.attestation_cache.add_attestation(attestation, self.state)
+        self.attestation_cache.add_attestation(attestation, self.store, marker=marker)
 
-    def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof):
+    def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof, marker=None):
         # TODO check signature
-        self.handle_attestation(aggregate.message.aggregate)
+        self.handle_attestation(aggregate.message.aggregate, marker)
 
-    def handle_block(self, block: spec.SignedBeaconBlock):
+    def handle_block(self, block: spec.SignedBeaconBlock, marker=None):
         # Try to process an old chain first
         old_chain = self.block_cache.longest_outstanding_chain(self.store)
         if len(old_chain) > 0:
@@ -515,13 +520,13 @@ class BeaconClient(Process):
             chain = []
         self.__debug(len(chain), 'BlocksToHandle')
         for cblock in chain:
-            self.__process_block_contents(cblock)
+            self.__process_block_contents(cblock, marker)
 
-    def __process_block_contents(self, block: spec.SignedBeaconBlock):
+    def __process_block_contents(self, block: spec.SignedBeaconBlock, marker=None):
         try:
             if block.message.slot > self.current_slot:
-                    self.__debug(f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])", 'FutureBlockWarning')
-                    return
+                self.__debug(f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])", 'FutureBlockWarning')
+                return
             spec.on_block(self.store, block)
             self.block_cache.accept_block(block)
 
@@ -532,13 +537,59 @@ class BeaconClient(Process):
                 self.__debug(pslashing, 'ProposerSlashing')
                 self.slashings['proposer'].append(str(pslashing))
             for attestation in block.message.body.attestations:
-                self.attestation_cache.add_attestation(attestation, self.state, seen_in_block=True)
+                self.attestation_cache.add_attestation(attestation, self.store, seen_in_block=True, marker=marker)
         except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
-                print(f'[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text}! {str(block.message)}!')
+                print(f'[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text})! slot=[{block.message.slot}] proposer_index=[{block.message.proposer_index}] root=[{spec.hash_tree_root(block.message)}] parent_root=[{block.message.parent_root}]')
+                self.handle_invalid_block(block, str(text))
+    
+    def handle_invalid_block(self, signed_block: spec.SignedBeaconBlock, reason: str):
+        """
+        When time attacked beacon clients are inside the simulation, the following happens:
+            - The time attacked client produces a block, `timedelta` slots later
+            - If `timedelta` is big enough, the blocks produced by them will not share the same finalized checkpoint
+            - As such, the blocks will be rejected by the honest beacon clients
+            - Becuase the blocks are rejected, their post-state will never be calculated
+            - Because their state is not calculated, the attestation cache cannot determine who attested for them. The attestations are ignored.
+            - When the attestations are ignored, the participant will never get slashed
+        Because of that, we will calculate the post-state of _every_ block, even those, which are invalid because of mismatching checkpoints
+        """
+        
+        if 'get_ancestor' in reason and 'finalized_checkpoint' in reason:
+            print(f"[BEACON CLIENT {self.counter}] Add the block to fork choice store, even though it is invalid because of mismatching checkpoints")
+
+            """
+            The following lines are directly taken from the eth2.0-spec code (`on_block`)
+            <copy>
+            """
+            block = signed_block.message
+            # Parent block must be known
+            assert block.parent_root in self.store.block_states
+            # Make a copy of the state to avoid mutability issues
+            pre_state = self.store.block_states[block.parent_root].copy()
+            # Blocks cannot be in the future. If they are, their consideration must be delayed until the are in the past.
+            assert spec.get_current_slot(self.store) >= block.slot
+
+            # Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
+            finalized_slot = spec.compute_start_slot_at_epoch(self.store.finalized_checkpoint.epoch)
+            assert block.slot > finalized_slot
+            # Check block is a descendant of the finalized block at the checkpoint finalized slot
+            # assert get_ancestor(store, block.parent_root, finalized_slot) == store.finalized_checkpoint.root
+
+            # Check the block is valid and compute the post-state
+            state = pre_state.copy()
+            spec.state_transition(state, signed_block, True)
+            # Add new block to the store
+            self.store.blocks[spec.hash_tree_root(block)] = block
+            # Add new state for this block to the store
+            self.store.block_states[spec.hash_tree_root(block)] = state
+            """
+            </copy>
+            """
+            self.block_cache.accept_block(signed_block)
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
@@ -557,14 +608,15 @@ class BeaconClient(Process):
         actions[message.message_type](payload)
 
     def attest(self):
+        self.__compute_head()
+        self.pre_attest()
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         if self.current_slot not in self.committee or current_epoch not in self.committee_count:
             self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
         attesting_validators = self.__attesting_validators_at_current_slot()
         if len(attesting_validators) < 1:
             return
-
-        self.__compute_head()
+        
         head_block = self.store.blocks[self.head_root]
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:
@@ -606,10 +658,6 @@ class BeaconClient(Process):
                 signature=spec.get_attestation_signature(self.state, attestation_data, validator.privkey)
             )
 
-            self.attestation_cache.add_attestation(attestation, self.state)
-            self.slot_last_attested = self.current_slot.copy()
-            self.last_attestation_data[validator_committee] = attestation_data
-
             encoded_attestation = attestation.encode_bytes()
             message = MessageEvent(
                 time=self.current_time,
@@ -620,8 +668,14 @@ class BeaconClient(Process):
                 toidx=None
             )
             self.client_to_simulator_queue.put(message)
+            self.attestation_cache.add_attestation(attestation, self.store, marker=message.marker)
+            self.slot_last_attested = self.current_slot.copy()
+            self.last_attestation_data[validator_committee] = attestation_data
             self.__debug(message.marker, 'AttestationMessageSent')
             self.__debug(attestation, 'AttestationSend')
+    
+    def pre_attest(self):
+        pass
     
     def produce_attestation_data(self, validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state) -> Optional[spec.AttestationData]:
         return spec.AttestationData(
