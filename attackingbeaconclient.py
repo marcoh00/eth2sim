@@ -27,7 +27,6 @@ class TimeAttackedBeaconClient(BeaconClient):
         if self.attack_started and type(message) in (LatestVoteOpportunity, AggregateOpportunity):
             message.time += self.timedelta * spec.SECONDS_PER_SLOT
             message.slot += self.timedelta
-            #print(f'Change type of {type(message)}')
     
     def pre_next_slot_event(self, message: NextSlotEvent):
         # Update internal state of attack

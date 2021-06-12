@@ -39,12 +39,14 @@ class AttestationCache:
     cache_by_validator: Dict[spec.ValidatorIndex, List[CachedAttestation]]
     queued_attestations: Queue
     state_cache: Dict[spec.Epoch, Dict[spec.Root, spec.BeaconState]]
+    counter: int
 
-    def __init__(self):
+    def __init__(self, counter=-1):
         self.cache_by_time = dict()
         self.cache_by_validator = dict()
         self.queued_attestations = Queue()
         self.state_cache = dict()
+        self.counter = counter
 
     # TODO do not immediately set the validators for future attestations. The committee is not known now!!
     def add_attestation(self, attestation: spec.Attestation, store: spec.Store, seen_in_block=False, raise_on_error=False, marker=None):
@@ -57,11 +59,10 @@ class AttestationCache:
         # Check if we have a state to determine the correct committee
         attestation_block_root = attestation.data.beacon_block_root
         if attestation_block_root not in store.block_states:
-            traceback.print_stack()
             if raise_on_error:
-                raise ValueError(f'Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
+                raise ValueError(f'[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
             else:
-                print(f'Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
+                print(f'[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
                 self.queued_attestations.put((attestation, marker))
                 return
 
@@ -70,21 +71,15 @@ class AttestationCache:
         attestation_block_slot_epoch = spec.compute_epoch_at_slot(attestation_block_state.slot)
 
         if attestation_slot_epoch > attestation_block_slot_epoch + 1:
-            print(f'Received an attestation for slot {attestation.data.slot} (epoch {attestation_slot_epoch}) which attests for a block in slot {attestation_block_state.slot} (epoch {attestation_block_slot_epoch})')
             if attestation_slot_epoch in self.state_cache and attestation_block_root in self.state_cache[attestation_slot_epoch]:
                 attestation_block_state = self.state_cache[attestation_slot_epoch][attestation_block_root]
             else:
-                print("Forward state to attestation slot")
+                print(f"[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Attestation Cache needs to manually forward the state. epoch_block_slot=[{attestation_block_slot_epoch}] epoch_attestation_slot=[{attestation_slot_epoch}]")
                 spec.process_slots(attestation_block_state, attestation.data.slot)
                 self.__ensure_key_exists(self.state_cache, attestation_slot_epoch, dict)
                 self.state_cache[attestation_slot_epoch][attestation_block_root] = attestation_block_state
 
         cached_attestation = CachedAttestation.from_attestation(attestation, attestation_block_state)
-        
-        if cached_attestation.attestation.data.target.epoch > cached_attestation.attestation.data.source.epoch + 2:
-            print(f"[{getpid()}] Using the updated state on slot {attestation_block_state.slot}, attestation for slot=[{cached_attestation.attestation.data.slot}] root=[{cached_attestation.attestation.data.beacon_block_root}] srcep=[{cached_attestation.attestation.data.source.epoch}] targetep=[{cached_attestation.attestation.data.target.epoch}] with validators=[{cached_attestation.attesting_indices}] seems fishy")
-            print(f"Beacon Committee for Slot, Committee {cached_attestation.attestation.data.index}: {spec.get_beacon_committee(attestation_block_state, cached_attestation.attestation.data.slot, cached_attestation.attestation.data.index)}")
-            print(marker)
         cached_attestation.seen_in_block = seen_in_block
         slot, committee = attestation.data.slot, attestation.data.index
 
@@ -108,7 +103,7 @@ class AttestationCache:
             attestation, marker = self.queued_attestations.get()
             try:
                 self.add_attestation(attestation, store, raise_on_error=True, marker=marker)
-                print(f'Successfully added queued attestation into cache: root=[{attestation.data.beacon_block_root}] slot=[{attestation.data.slot}]')
+                print(f'[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Successfully added queued attestation into cache: root=[{attestation.data.beacon_block_root}] slot=[{attestation.data.slot}]')
             except ValueError:
                 unsuccessful.put((attestation, marker))
         self.queued_attestations = unsuccessful
