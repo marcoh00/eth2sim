@@ -1,4 +1,4 @@
-from attackingbeaconclient import TimeAttackedBeaconClient
+from attackingbeaconclient import TimeAttackedBeaconClient, BalancingAttackingBeaconClient
 from slashingbeaconclient import AttesterSlashingSameHeightClient, AttesterSlashingWithinSpan, BlockSlashingBeaconClient
 from beaconclient import BeaconClient
 from multiprocessing import JoinableQueue, Queue
@@ -39,12 +39,12 @@ class BeaconClientBuilder(Builder):
         self.validator_start_at = 0
         self.simulator_to_client_queue = JoinableQueue()
         self.client_to_simulator_queue = Queue()
-        self.attackinfo = None
+        self.attackinfo = {}
 
     def build_impl(self, counter):
         if not self.neccessary_info_set:
             raise ValueError('Need to specify queues and validator start index')
-        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan', 'TimeAttacked'):
+        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan', 'TimeAttacked', 'BalancingAttacking'):
             raise ValueError(f'Unknown mode: {self.mode}')
 
         if self.mode == 'HONEST':
@@ -100,8 +100,22 @@ class BeaconClientBuilder(Builder):
             )
         elif self.mode == 'TimeAttacked':
             print('CONSTRUCT TIME ATTACKED')
-            assert self.attackinfo is not None
+            assert len(self.attackinfo.keys()) == 3 
             return TimeAttackedBeaconClient(
+                counter=counter,
+                simulator_to_client_queue=self.simulator_to_client_queue,
+                client_to_simulator_queue=self.client_to_simulator_queue,
+                configpath=self.configpath,
+                configname=self.configname,
+                validator_builders=self.validator_builders,
+                validator_first_counter=self.validator_start_at,
+                debug=self.debug,
+                profile=self.profile,
+                **self.attackinfo
+            )
+        elif self.mode == 'BalancingAttacking':
+            print('CONSTRUCT BALANCING ATTACKING')
+            return BalancingAttackingBeaconClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,

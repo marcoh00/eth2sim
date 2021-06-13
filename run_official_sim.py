@@ -247,6 +247,23 @@ def simulation15(config, blockhash):
         .build()\
         .build()
 
+def simulation16(config, blockhash):
+    return SimulationBuilder('../../configs', config, blockhash)\
+        .set_end_time(calc_simtime(slot=1, epoch=13))\
+        .set_custom_latency_map(((0, 0),))\
+        .beacon_client(1)\
+            .set_debug(True)\
+            .set_mode('BalancingAttacking')\
+            .validators(64)\
+            .build()\
+        .build()\
+        .beacon_client(4)\
+            .set_debug(True)\
+            .validators(8)\
+            .build()\
+        .build()\
+        .build()
+
 def main():
     # 0 minimal 
     simtype = int(sys.argv[1])
@@ -267,7 +284,8 @@ def main():
         12: ('minimal', simulation12), # proposer slashing
         13: ('minimal', simulation13), # attester slashings
         14: ('mainnet-minimized', simulation14), # latency, 128/256
-        15: ('minimal', simulation15)
+        15: ('minimal', simulation15), # time attacked
+        16: ('minimal', simulation16) # balancing attacking
     }
     mocked = simtype > 2
     mocked_filename = "mocked_" if mocked else ""

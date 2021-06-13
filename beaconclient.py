@@ -54,7 +54,6 @@ class BeaconClient(Process):
 
     should_quit: bool
     head_state: Optional[spec.BeaconState]
-    state_head_root: Optional[spec.Root]
 
     def __init__(self,
                  counter: int,
@@ -92,7 +91,6 @@ class BeaconClient(Process):
         self.build_validators()
 
         self.head_state = None
-        self.state_head_root = None
 
     def __debug(self, obj, typ: str):
         if not self.debug:
@@ -375,6 +373,7 @@ class BeaconClient(Process):
         self.__compute_head()
         if self.current_slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee(current_epoch)
+            self.on_epoch_start()
 
         # Try to process queued attestations
         self.attestation_cache.add_queued_attestations(self.store)
@@ -415,6 +414,9 @@ class BeaconClient(Process):
         self.post_next_slot_event(head_state, self.indexed_validators)
     
     def pre_next_slot_event(self, message: NextSlotEvent):
+        pass
+
+    def on_epoch_start(self):
         pass
 
     def post_next_slot_event(self, head_state, indexed_validators):
@@ -707,8 +709,12 @@ class BeaconClient(Process):
         return self.state.validators[validator].slashed
 
     def __attesting_validators_at_current_slot(self) -> Dict[spec.ValidatorIndex, Validator]:
+        return self.attesting_validators_at_slot(self.current_slot)
+    
+    def attesting_validators_at_slot(self, slot: spec.Slot) -> Dict[spec.ValidatorIndex, Validator]:
+        assert slot in self.committee
         attesting_indices = set(validator.index for validator in self.validators) \
-            .intersection(set(self.committee[self.current_slot].keys()))
+            .intersection(set(self.committee[slot].keys()))
         attesting_validators: Dict[spec.ValidatorIndex, Validator] = {validator.index: validator
                                                                       for validator in self.validators
                                                                       if validator.index in attesting_indices
