@@ -257,9 +257,9 @@ def simulation16(config, blockhash):
             .validators(64)\
             .build()\
         .build()\
-        .beacon_client(4)\
+        .beacon_client(63)\
             .set_debug(True)\
-            .validators(8)\
+            .validators(1)\
             .build()\
         .build()\
         .build()

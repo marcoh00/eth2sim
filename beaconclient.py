@@ -22,7 +22,7 @@ import eth2spec.phase0.spec as spec
 from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
+from events import NextSlotEvent, BeaconClientInfo, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
     ProduceStatisticsEvent, ProduceGraphEvent, ValidatorInitializationEvent
 from helpers import queue_element_or_none
 from validator import Validator, ValidatorBuilder
@@ -155,11 +155,15 @@ class BeaconClient(Process):
             AggregateOpportunity: self.handle_aggregate_opportunity,
             NextSlotEvent: self.handle_next_slot_event,
             ProduceStatisticsEvent: self.handle_statistics_event,
-            ProduceGraphEvent: self.produce_graph_event
+            ProduceGraphEvent: self.produce_graph_event,
+            BeaconClientInfo: self.handle_beacon_client_info
         }
         # noinspection PyArgumentList,PyTypeChecker
         self.pre_event_handling(event)
         actions[type(event)](event)
+    
+    def handle_beacon_client_info(self, event: BeaconClientInfo):
+        pass
     
     def pre_event_handling(self, event: Event):
         pass
@@ -370,7 +374,7 @@ class BeaconClient(Process):
         self.pre_next_slot_event(message)
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         spec.on_tick(self.store, message.time)
-        self.__compute_head()
+        self.compute_head()
         if self.current_slot % spec.SLOTS_PER_EPOCH == 0:
             self.update_committee(current_epoch)
             self.on_epoch_start()
@@ -613,7 +617,7 @@ class BeaconClient(Process):
         actions[message.message_type](payload)
 
     def attest(self):
-        self.__compute_head()
+        self.compute_head()
         self.pre_attest()
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         if self.current_slot not in self.committee or current_epoch not in self.committee_count:
@@ -693,7 +697,7 @@ class BeaconClient(Process):
                 target=spec.Checkpoint(epoch=spec.get_current_epoch(head_state), root=epoch_boundary_block_root)
             )
 
-    def __compute_head(self):
+    def compute_head(self):
         self.head_root = spec.get_head(self.store)
         self.state = self.store.block_states[self.head_root]
         self.head_state = self.state.copy()

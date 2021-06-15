@@ -65,6 +65,7 @@ class Network(object):
     def delay(self, message: MessageEvent):
         if message.custom_latency is not None:
             latency = message.custom_latency
+            print(f"Message from Client {message.fromidx} to Client {message.toidx} with custom latency {message.custom_latency} will be delivered on {message.time + latency}")
         else:
             latency = self.latency(message.time, message.fromidx, message.toidx, message.message_type)
         message.time += latency

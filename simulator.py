@@ -14,7 +14,7 @@ from beaconclient_builder import BeaconClientBuilder
 from builder import Builder
 from eth2spec.phase0 import spec
 from eth2spec.test.helpers.deposits import build_deposit, build_deposit_data
-from events import NextSlotEvent, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
+from events import NextSlotEvent, BeaconClientInfo, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
     Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent, ValidatorInitializationEvent
 from helpers import initialize_beacon_state_from_mocked_eth1, queue_element_or_none
 from network import Network
@@ -161,10 +161,19 @@ class Simulator:
             return client.validators[0].counter, client.validators[0].counter
         else:
             return client.validators[0].counter, client.validators[-1].counter
+    
+    def beacon_client_info(self) -> Dict[int, List[int]]:
+        beacon_clients = dict()
+        for client in self.clients:
+            beacon_clients[client.beacon_client.counter] = list()
+            for validator in client.beacon_client.validators:
+                beacon_clients[client.beacon_client.counter].append(validator.counter)
+        return beacon_clients
 
     def initialize_clients(self):
         encoded_state = self.genesis_state.encode_bytes()
         encoded_block = self.genesis_block.encode_bytes()
+        beacon_client_info = self.beacon_client_info()
         print('[SIMULATOR] state_root={} block_root={}'.format(
             spec.hash_tree_root(self.genesis_state), spec.hash_tree_root(self.genesis_block)
         ))
@@ -180,6 +189,11 @@ class Simulator:
             client.queue.put(ValidatorInitializationEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
                 priority=0
+            ))
+            client.queue.put(BeaconClientInfo(
+                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                priority=5,
+                beacon_clients=beacon_client_info
             ))
             client.queue.put(MessageEvent(
                 time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),

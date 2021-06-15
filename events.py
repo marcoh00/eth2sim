@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Union, Optional
+from typing import Union, Optional, Dict, List
 
 from remerkleable.basic import uint64
 
@@ -32,6 +32,11 @@ class Event:
 @dataclass
 class ValidatorInitializationEvent(Event):
     pass
+
+
+@dataclass
+class BeaconClientInfo(Event):
+    beacon_clients: Dict[int, List[int]]
 
 
 @dataclass

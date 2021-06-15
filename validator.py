@@ -42,6 +42,7 @@ class Validator:
             self.index = spec.ValidatorIndex(self.counter)
         else:
             self.index = self.__find_index(state)
+            print(f"WARNING: Validator counter is not the same as ValidatorIndex. counter=[{self.counter}] index=[{self.index}]")
 
     def __find_index(self, state: spec.BeaconState) -> Optional[spec.ValidatorIndex]:
         for index, validator in enumerate(state.validators):
