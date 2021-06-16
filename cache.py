@@ -431,3 +431,17 @@ class BlockCache:
             if len(ochain) >= len(chain):
                 chain = ochain
         return chain
+
+    def leafs_for_block(self, root: spec.Root) -> Sequence[spec.Root]:
+        children = list()
+        for blockroot, block in self.blocks.items():
+            if block.message.parent_root == root:
+                children.append(blockroot)
+        leafs = list()
+        if len(children) == 0:
+            leafs.append(root)
+        else:
+            for child in children:
+                for leaf in self.leafs_for_block(child):
+                    leafs.append(leaf)
+        return leafs

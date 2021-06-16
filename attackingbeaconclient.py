@@ -91,9 +91,14 @@ class TimeAttackedBeaconClient(BeaconClient):
 class BalancingAttackingBeaconClient(BeaconClient):
     class AttackState(Enum):
         ATTACK_PLANNED = 0
-        ATTACK_STARTED_FIRST_EPOCH = 1
-        ATTACK_STARTED_SUBSEQUENT_EPOCHS = 2
-        ATTACK_STOPPED = 3
+        ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT = 1
+        ATTACK_STARTED_FIRST_EPOCH = 2
+        ATTACK_STARTED_SUBSEQUENT_EPOCHS = 3
+        ATTACK_STOPPED = 4
+
+        @classmethod
+        def attack_running(cls, instance):
+            return instance in (cls.ATTACK_STARTED_FIRST_EPOCH, cls.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT, cls.ATTACK_STARTED_SUBSEQUENT_EPOCHS)
     
     @dataclass
     class ClientWeightMap:
@@ -104,8 +109,11 @@ class BalancingAttackingBeaconClient(BeaconClient):
     attack_started_slot: Optional[spec.Slot]
 
     beacon_client_validator_map: Dict[int, Sequence[spec.ValidatorIndex]]
-    beacon_clients_left: Sequence[ClientWeightMap]
-    beacon_clients_right: Sequence[ClientWeightMap]
+    validator_beacon_client_map: Dict[spec.ValidatorIndex, int]
+    beacon_clients_left: Dict[spec.Slot, Sequence[int]]
+    beacon_clients_right: Dict[spec.Slot, Sequence[int]]
+    fillers_needed_left: Dict[spec.Slot, int]
+    fillers_needed_right: Dict[spec.Slot, int]
 
     swayers_first_epoch_left: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
     swayers_first_epoch_right: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
@@ -113,8 +121,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
     swayers_subsequent_epochs_left: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
     swayers_subsequent_epochs_right: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
 
-    fillers_left: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
-    fillers_right: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
+    fillers: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
 
     state_left: Optional[spec.BeaconState]
     head_state_left: Optional[spec.BeaconState]
@@ -124,6 +131,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
 
     block_root_left: Optional[spec.Root]
     block_root_right: Optional[spec.Root]
+    first_block_root_left: Optional[spec.Root]
+    first_block_root_right: Optional[spec.Root]
     
     def __init__(self, *kargs, **kwargs):
         super().__init__(
@@ -140,45 +149,54 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.attack_state = self.AttackState.ATTACK_PLANNED
         self.attack_started_slot = None
         self.beacon_client_validator_map = dict()
-        self.beacon_clients_left = list()
-        self.beacon_clients_right = list()
+        self.validator_beacon_client_map = dict()
+        self.beacon_clients_left = dict()
+        self.beacon_clients_right = dict()
+        self.fillers_needed_left = dict()
+        self.fillers_needed_right = dict()
         self.swayers_first_epoch_left = dict()
         self.swayers_first_epoch_right = dict()
         self.swayers_subsequent_epochs_left = dict()
         self.swayers_subsequent_epochs_right = dict()
-        self.fillers_left = dict()
-        self.fillers_right = dict()
+        self.fillers = dict()
         self.state_left = None
         self.head_state_left = None
         self.state_right = None
         self.head_state_right = None
         self.block_root_left = None
         self.block_root_right = None
+        self.first_block_root_left = None
+        self.first_block_root_right = None
     
     def handle_beacon_client_info(self, event: BeaconClientInfo):
         for beacon_client_counter in event.beacon_clients.keys():
             if beacon_client_counter == self.counter:
                 continue
             self.beacon_client_validator_map[beacon_client_counter] = tuple(spec.ValidatorIndex(index) for index in event.beacon_clients[beacon_client_counter])
+            for index in event.beacon_clients[beacon_client_counter]:
+                self.validator_beacon_client_map[spec.ValidatorIndex(index)] = beacon_client_counter
     
-    def determine_positition_of_beacon_clients(self):
-        all_clients_with_weight = list(self.ClientWeightMap(beacon_client_counter=i, weight=spec.Gwei(0)) for i in self.beacon_client_validator_map.keys())
-        self.update_weights(all_clients_with_weight)
-        all_clients_with_weight.sort(key=lambda c: c.weight, reverse=True)
+    def determine_positition_of_beacon_clients(self, slot: spec.Slot):
+        self.beacon_clients_left[slot] = list()
+        self.beacon_clients_right[slot] = list()
 
-        beacon_clients_left = list()
-        beacon_clients_right = list()
-        number_of_clients_even = len(all_clients_with_weight) % 2 == 0
-        number_of_clients_to_assign = len(all_clients_with_weight) if number_of_clients_even else len(all_clients_with_weight) - 1
-        for i in range(0, number_of_clients_to_assign, 2):
-            beacon_clients_left.append(all_clients_with_weight[i])
-            beacon_clients_right.append(all_clients_with_weight[i + 1])
-        if not number_of_clients_even:
-            beacon_clients_right.append(all_clients_with_weight[-1])
+        honest_indices_inside_slot_committees = tuple(set(self.committee[slot].keys()).difference(self.indexed_validators.keys()))
+        honest_clients_inside_slot_committees = tuple(set(self.validator_beacon_client_map[index] for index in honest_indices_inside_slot_committees))
+        assert len(honest_clients_inside_slot_committees) == len(honest_indices_inside_slot_committees)
+        attacker_indices_inside_slot_committee = len(set(self.committee[slot].keys()).intersection(self.indexed_validators.keys()))
 
-        self.beacon_clients_left = beacon_clients_left
-        self.beacon_clients_right = beacon_clients_right
-        print(self.weight_for_side())
+        honest_indices_len = len(honest_indices_inside_slot_committees)
+        honest_indices_len_even = honest_indices_len % 2 == 0
+        honest_indices_upto = honest_indices_len if honest_indices_len_even else honest_indices_len - 1
+        for i in range(0, honest_indices_upto, 2):
+            self.beacon_clients_left[slot].append(honest_clients_inside_slot_committees[i])
+            self.beacon_clients_right[slot].append(honest_clients_inside_slot_committees[i + 1])
+        
+        self.fillers_needed_left[slot] = 0
+        self.fillers_needed_right[slot] = 0
+        if not honest_indices_len_even:
+            self.beacon_clients_left[slot].append(honest_clients_inside_slot_committees[-1])
+            self.fillers_needed_right[slot] = 1
     
     def weight_for_side(self) -> Tuple[spec.Gwei, spec.Gwei]:
         left = sum(client.weight for client in self.beacon_clients_left)
@@ -194,13 +212,19 @@ class BalancingAttackingBeaconClient(BeaconClient):
             ))
 
     def on_epoch_start(self):
+        assert spec.compute_start_slot_at_epoch(spec.compute_epoch_at_slot(self.current_slot)) == self.current_slot
+        for slot_i in range(self.current_slot, self.current_slot + spec.SLOTS_PER_EPOCH):
+            self.determine_positition_of_beacon_clients(spec.Slot(slot_i))
         if self.attack_state == self.AttackState.ATTACK_PLANNED:
-            self.determine_positition_of_beacon_clients()
             feasible = self.is_attack_feasible()
             if feasible:
                 # self.client_to_simulator_queue.put(SimulationEndEvent(self.current_time, 0, feasible))
-                self.attack_state = self.AttackState.ATTACK_STARTED_FIRST_EPOCH
+                self.attack_state = self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT
                 self.attack_started_slot = self.current_slot.copy()
+    
+    def pre_next_slot_event(self, message: MessageEvent):
+        if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT:
+            self.attack_state = self.AttackState.ATTACK_STARTED_FIRST_EPOCH
     
     def is_attack_feasible(self) -> bool:
         """
@@ -257,7 +281,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 slot = spec.Slot(slot_minus_one + 1)
                 self.assign(validators, slot)
             self.assign(adversarial_validators_for_last_slot, spec.Slot(spec.SLOTS_PER_EPOCH - spec.Slot(1)))
-            print(f'[BEACON CLIENT 0] swayers_left_first=[{self.swayers_first_epoch_left}] swayers_right_first=[{self.swayers_first_epoch_right}] swayers_left_subsequent=[{self.swayers_subsequent_epochs_left}] swayers_right_subsequent=[{self.swayers_subsequent_epochs_right}] fillers_left=[{self.fillers_left}] fillers_right=[{self.fillers_right}]')
+            print(f'[BEACON CLIENT 0] swayers_left_first=[{self.swayers_first_epoch_left}] swayers_right_first=[{self.swayers_first_epoch_right}] swayers_left_subsequent=[{self.swayers_subsequent_epochs_left}] swayers_right_subsequent=[{self.swayers_subsequent_epochs_right}] fillers=[{self.fillers}]')
         return attack_feasible
     
     def side_with_more_weight(self) -> str:
@@ -270,14 +294,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
             return 'draw'
     
     def number_of_fillers_needed(self) -> int:
-        left_balance, right_balance = self.weight_for_side()
-        if left_balance == right_balance:
-            return 0
-        elif left_balance > right_balance:
-            difference = left_balance - right_balance
-        else:
-            difference = right_balance - left_balance
-        return difference // spec.Gwei(32 * 10**9)
+        return 1
     
     def number_of_extra_swayers(self) -> int:
         return 0
@@ -311,30 +328,12 @@ class BalancingAttackingBeaconClient(BeaconClient):
             validator_index += 1
             dict_index = (dict_index + 1) % len(swayers_dicts)
         
-        if not validators_len_even:
-            validators_len -= 1
-        
-        self.fillers_left[slot] = []
-        self.fillers_right[slot] = []
-
-        fillers_needed = self.number_of_fillers_needed()
-        if fillers_needed > 0:
-            more_weight_on = self.side_with_more_weight()
-            side_to_be_filled = self.fillers_left if more_weight_on == 'right' else self.fillers_right
-            for i in range(0, fillers_needed):
-                side_to_be_filled[slot].append(validators[validator_index])
-                validator_index += 1
-
-        validators_left = len(validators) - validator_index
-        validators_left = validators_left if validators_left % 2 == 0 else validators_left - 1
-        for validator_index_filler in range(validator_index, validators_left, 2):
-            self.fillers_left[slot].append(validators[validator_index_filler])
-            self.fillers_right[slot].append(validators[validator_index_filler + 1])
+        self.fillers[slot] = validators[validator_index:]
     
     def propose_block(self, validator: Validator, head_state: spec.BeaconState, slashme=False):
-        if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH and self.current_slot == self.attack_started_slot:
+        if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT:
             self.propose_blocks_start_attack(validator, head_state)
-        elif self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH or self.attack_state == self.AttackState.ATTACK_STARTED_SUBSEQUENT_EPOCHS:
+        elif self.AttackState.attack_running(self.attack_state):
             # TODO Calculate an head state depending on the proposer being left or right
             super().propose_block(validator, head_state)
         else:
@@ -403,6 +402,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
 
         self.block_root_left = spec.hash_tree_root(block_left)
         self.block_root_right = spec.hash_tree_root(block_right)
+        self.first_block_root_left = self.block_root_left
+        self.first_block_root_right = self.block_root_right
 
         print(f"block_root_left=[{self.block_root_left}] block_root_right=[{self.block_root_right}]")
 
@@ -428,14 +429,14 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.client_to_simulator_queue.put(message_left)
         self.client_to_simulator_queue.put(message_right)
 
-        for beacon_client_map in self.beacon_clients_left:
+        for beacon_client in self.beacon_clients_left[self.current_slot]:
             message_left_to_left = MessageEvent(
                 time=self.current_time,
                 priority=20,
                 message=encoded_signed_block_left,
                 message_type='SignedBeaconBlock',
                 fromidx=self.counter,
-                toidx=beacon_client_map.beacon_client_counter,
+                toidx=beacon_client,
                 custom_latency=0
             )
             message_right_to_left = MessageEvent(
@@ -444,20 +445,24 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 message=encoded_signed_block_right,
                 message_type='SignedBeaconBlock',
                 fromidx=self.counter,
-                toidx=beacon_client_map.beacon_client_counter,
-                custom_latency=spec.SECONDS_PER_SLOT * (spec.SLOTS_PER_EPOCH + 6)
+                toidx=beacon_client,
+                custom_latency=spec.SECONDS_PER_SLOT - 1
             )
             self.client_to_simulator_queue.put(message_left_to_left)
             self.client_to_simulator_queue.put(message_right_to_left)
-        
-        for beacon_client_map in self.beacon_clients_right:
+        print("---")
+        print(self.beacon_clients_left)
+        print("---")
+        print(self.beacon_clients_right)
+        print("---")
+        for beacon_client in self.beacon_clients_right[self.current_slot]:
             message_right_to_right = MessageEvent(
                 time=self.current_time,
                 priority=20,
                 message=encoded_signed_block_right,
                 message_type='SignedBeaconBlock',
                 fromidx=self.counter,
-                toidx=beacon_client_map.beacon_client_counter,
+                toidx=beacon_client,
                 custom_latency=0
             )
             message_left_to_right = MessageEvent(
@@ -466,8 +471,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 message=encoded_signed_block_left,
                 message_type='SignedBeaconBlock',
                 fromidx=self.counter,
-                toidx=beacon_client_map.beacon_client_counter,
-                custom_latency=spec.SECONDS_PER_SLOT * (spec.SLOTS_PER_EPOCH + 6)
+                toidx=beacon_client,
+                custom_latency=spec.SECONDS_PER_SLOT - 1
             )
             self.client_to_simulator_queue.put(message_right_to_right)
             self.client_to_simulator_queue.put(message_left_to_right)
@@ -477,3 +482,14 @@ class BalancingAttackingBeaconClient(BeaconClient):
     
     def compute_head(self):
         super().compute_head()
+        self.block_root_left = self.block_cache.leafs_for_block(self.first_block_root_left)[0]
+        self.block_root_right = self.block_cache.leafs_for_block(self.first_block_root_right)[0]
+        if self.AttackState.attack_running(self.attack_state) and not self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT:
+            self.state_left = self.store.block_states[self.block_root_left]
+            self.state_right = self.store.block_states[self.block_root_right]
+
+            self.head_state_left = self.state_left.copy()
+            spec.process_slots(self.head_state_left, self.current_slot)
+
+            self.head_state_right = self.state_right.copy()
+            spec.process_slots(self.head_state_right, self.current_slot)
