@@ -44,7 +44,7 @@ class AttestationCache:
     def __init__(self, counter=-1):
         self.cache_by_time = dict()
         self.cache_by_validator = dict()
-        self.queued_attestations = Queue()
+        self.queued_attestations = None
         self.state_cache = dict()
         self.counter = counter
 
@@ -63,6 +63,8 @@ class AttestationCache:
                 raise ValueError(f'[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
             else:
                 print(f'[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]')
+                if self.queued_attestations is None:
+                    self.queued_attestations = Queue()
                 self.queued_attestations.put((attestation, marker))
                 return
 
@@ -98,6 +100,8 @@ class AttestationCache:
             cached_attestation.seen_in_block = True
     
     def add_queued_attestations(self, store: spec.Store):
+        if self.queued_attestations is None:
+            self.queued_attestations = Queue()
         unsuccessful = Queue()
         while not self.queued_attestations.empty():
             attestation, marker = self.queued_attestations.get()

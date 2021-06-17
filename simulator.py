@@ -383,7 +383,7 @@ class SimulationBuilder(Builder):
         self.statproducers = []
         self.graphproducers = []
         self.custom_latency_map = None
-        self.latency_modifier = lambda x: x
+        self.latency_modifier = None
 
     def beacon_client(self, count):
         self.current_child_count = count
