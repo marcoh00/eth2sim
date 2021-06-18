@@ -2,7 +2,7 @@ from queue import Queue
 from eth2spec.phase0 import spec
 from events import AggregateOpportunity, Event, LatestVoteOpportunity, NextSlotEvent, SimulationEndEvent, BeaconClientInfo, MessageEvent
 from beaconclient import BeaconClient
-from typing import Optional, Sequence, Dict, Tuple, List
+from typing import Optional, Sequence, Dict, Tuple, List, Set
 from enum import Enum
 from validator import Validator
 from dataclasses import dataclass
@@ -118,17 +118,17 @@ class BalancingAttackingBeaconClient(BeaconClient):
     beacon_clients_neither: Dict[spec.Slot, Sequence[int]]
     fillers_needed_left: Dict[spec.Slot, int]
     fillers_needed_right: Dict[spec.Slot, int]
-    unparticipating_validators: Dict[spec.Slot, Sequence[spec.Validator]]
 
     # Slot indices indicate number of slot inside epoch
     swayers_first_epoch_left: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
     swayers_first_epoch_right: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
 
-    swayers_subsequent_epochs_left: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
-    swayers_subsequent_epochs_right: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
+    swayers_subsequent_epochs_left: Set[spec.ValidatorIndex]
+    swayers_subsequent_epochs_right: Set[spec.ValidatorIndex]
+    unparticipating_validators: Set[spec.ValidatorIndex]
 
     fillers_first_epoch: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
-    fillers_subsequent_epochs: Dict[spec.Slot, Sequence[spec.Validator]]
+    fillers_subsequent_epochs: Set[spec.ValidatorIndex]
 
     attestations_saved_left: Dict[spec.Epoch, Queue[spec.Attestation]]
     attestations_saved_right: Dict[spec.Epoch, Queue[spec.Attestation]]
@@ -165,13 +165,13 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.beacon_clients_neither = dict()
         self.fillers_needed_left = dict()
         self.fillers_needed_right = dict()
-        self.unparticipating_validators = dict()
+        self.unparticipating_validators = set()
         self.swayers_first_epoch_left = dict()
         self.swayers_first_epoch_right = dict()
-        self.swayers_subsequent_epochs_left = dict()
-        self.swayers_subsequent_epochs_right = dict()
+        self.swayers_subsequent_epochs_left = set()
+        self.swayers_subsequent_epochs_right = set()
         self.fillers_first_epoch = dict()
-        self.fillers_subsequent_epochs = dict()
+        self.fillers_subsequent_epochs = set()
         self.attestations_saved_left = dict()
         self.attestations_saved_right = dict()
         self.state_left = None
@@ -245,7 +245,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
         assert spec.compute_start_slot_at_epoch(epoch) == self.current_slot
         self.attestations_saved_left[epoch] = Queue()
         self.attestations_saved_right[epoch] = Queue()
-        for slot_i in range(self.current_slot, self.current_slot + spec.SLOTS_PER_EPOCH):
+        for slot_i in range(self.current_slot, self.current_slot + (2 * spec.SLOTS_PER_EPOCH)):
+            self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
+            self.update_committee(spec.compute_epoch_at_slot(self.current_slot + spec.SLOTS_PER_EPOCH))
             self.determine_positition_of_beacon_clients(spec.Slot(slot_i))
         if self.attack_state == self.AttackState.ATTACK_PLANNED:
             feasible = self.is_attack_feasible()
@@ -253,6 +255,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 # self.client_to_simulator_queue.put(SimulationEndEvent(self.current_time, 0, feasible))
                 self.attack_state = self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT
                 self.attack_started_slot = self.current_slot.copy()
+        if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH:
+            self.attack_state = self.AttackState.ATTACK_STARTED_SUBSEQUENT_EPOCHS
     
     def pre_next_slot_event(self, message: MessageEvent):
         if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT:
@@ -342,24 +346,25 @@ class BalancingAttackingBeaconClient(BeaconClient):
         swayers_for_slot = swayers // 2
         swayers_per_direction = swayers_for_slot // 2
 
-        swayers_dicts = [self.swayers_subsequent_epochs_left, self.swayers_subsequent_epochs_right]
         if not is_last_slot_of_epoch:
-            swayers_dicts.append(self.swayers_first_epoch_left)
-            swayers_dicts.append(self.swayers_first_epoch_right)
+            # Here we assign swayers per epoch
+            collections = (self.swayers_first_epoch_left, self.swayers_first_epoch_right)
+            for swayer_collection in collections:
+                swayer_collection[slot] = list()
+            # Assign swayers // 2 swayers to these collections
+            for swayeridx in range(0, swayers // 2):
+                collections[swayeridx % 2][slot].append(validators[swayeridx])
+        # Assign validator ids for subsequent epochs
+        start = 0 if is_last_slot_of_epoch else swayers // 2
+        collections = (self.swayers_subsequent_epochs_left, self.swayers_subsequent_epochs_right)
+        for swayeridx in range(start, swayers, 1):
+            collections[swayeridx % 2].add(validators[swayeridx])
         
-        for swayers_dict in swayers_dicts:
-            swayers_dict[slot] = list()
-        
-        validator_index = 0
-        dict_index = 0
-        while sum(len(swayers_dict[slot]) for swayers_dict in swayers_dicts) < swayers:
-            swayers_dicts[dict_index][slot].append(validators[validator_index])
-            validator_index += 1
-            dict_index = (dict_index + 1) % len(swayers_dicts)
-        
-        self.fillers_first_epoch[slot] = validators[validator_index]
-        self.fillers_subsequent_epochs[slot] = validators[validator_index + 1]
-        self.unparticipating_validators[slot] = validators[validator_index + 1:]
+        # TODO call number_of_fillers_needed and add the appropriate amount of fillers
+        self.fillers_first_epoch[slot] = [validators[swayers],]
+        self.fillers_subsequent_epochs.add(validators[swayers + 1])
+        for unparticipating in validators[swayers + 1:]:
+            self.unparticipating_validators.add(unparticipating)
     
     def propose_block(self, validator: Validator, head_state: spec.BeaconState, slashme=False):
         if self.attack_state == self.AttackState.ATTACK_STARTED_FIRST_EPOCH_FIRST_SLOT:
@@ -390,72 +395,95 @@ class BalancingAttackingBeaconClient(BeaconClient):
         - Swayers vote for their side and save the vote
         - Fillers and swayers votes from the previous epoch are transmitted as needed
         """
+        self.compute_head()
         if not self.AttackState.attack_running(self.attack_state):
             super().attest()
+        elif self.attack_state == self.AttackState.ATTACK_STARTED_SUBSEQUENT_EPOCHS:
+            self.save_votes()
+            self.attest_subsequent_epoch()
+        elif True:
+            self.save_votes()
+            self.attest_first_epoch()
+    def get_attestation_left(self, validator_index: spec.ValidatorIndex) -> spec.Attestation:
+        validator = self.indexed_validators[validator_index]
+        current_epoch = spec.compute_epoch_at_slot(self.current_slot)
+
+        start_slot = spec.compute_start_slot_at_epoch(current_epoch)
+        epoch_boundary_block_root = self.block_root_left\
+            if start_slot == self.current_slot\
+            else spec.get_block_root(self.head_state_left, current_epoch)
+        
+        validator_committee = self.committee[self.current_slot][validator_index][0]
+        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_left, self.state_left)
+        return self.produce_attestation(attestation_data, validator_index, validator)
+
+    def get_attestation_right(self, validator_index: spec.ValidatorIndex) -> spec.Attestation:
+        validator = self.indexed_validators[validator_index]
+        current_epoch = spec.compute_epoch_at_slot(self.current_slot)
+
+        start_slot = spec.compute_start_slot_at_epoch(current_epoch)
+        epoch_boundary_block_root = self.block_root_right\
+            if start_slot == self.current_slot\
+            else spec.get_block_root(self.head_state_right, current_epoch)
+        
+        validator_committee = self.committee[self.current_slot][validator_index][0]
+        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_right, self.state_right)
+        return self.produce_attestation(attestation_data, validator_index, validator)
+    
+    def save_votes(self):
+        current_epoch = spec.compute_epoch_at_slot(self.current_slot)
+        for validator_index in self.attesting_validators_at_slot(self.current_slot).keys():
+            if validator_index in self.swayers_subsequent_epochs_left:
+                self.attestations_saved_left[current_epoch].put(self.get_attestation_left(validator_index))
+            if validator_index in self.swayers_subsequent_epochs_right\
+                or validator_index in self.fillers_subsequent_epochs:
+                self.attestations_saved_right[current_epoch].put(self.get_attestation_right(validator_index))
+        print(f"attestations_left=[{self.attestations_saved_left[current_epoch].qsize()}] attestations_right=[{self.attestations_saved_right[current_epoch].qsize()}]")
+    
+    def attest_first_epoch(self):
+        slot_inside_epoch = self.current_slot - self.attack_started_slot
+        # Fillers for current slot
+        for _ in range(0, self.fillers_needed_left[self.current_slot]):
+            validator = self.fillers_first_epoch[slot_inside_epoch].pop()
+            attestation = self.get_attestation_left(validator)
+            self.send_message(
+                message_type='Attestation',
+                message=attestation,
+                toidx=None
+            )
+            self.log(attestation, 'CurrentEpochFillerLeft')
+        for _ in range(0, self.fillers_needed_right[self.current_slot]):
+            validator = self.fillers_first_epoch[slot_inside_epoch].pop()
+            attestation = self.get_attestation_right(validator)
+            self.send_message(
+                message_type='Attestation',
+                message=attestation,
+                toidx=None
+            )
+            self.log({'validator': validator, 'attestation': attestation}, 'CurrentEpochFillerRight')
+        
+        # Swayers for next slot
+        if slot_inside_epoch != 7:
+            assert len(self.swayers_first_epoch_left[slot_inside_epoch]) == len(self.swayers_first_epoch_right[slot_inside_epoch])
+            for validator_left, validator_right in zip(self.swayers_first_epoch_left[slot_inside_epoch], self.swayers_first_epoch_right[slot_inside_epoch]):
+                attestation_left = self.get_attestation_left(validator_left)
+                attestation_right = self.get_attestation_right(validator_right)
+                self.distribute_targeted_message(
+                    message_type='Attestation',
+                    left_message=attestation_left.encode_bytes(),
+                    right_message=attestation_right.encode_bytes(),
+                    latency=4,
+                    latency_otherside=10,
+                    priority=-1,
+                    target_slot=self.current_slot + 1
+                )
+                self.log({'validator': validator_left, 'attestation': attestation_left}, 'CurrentEpochSwayerLeft')
+                self.log({'validator': validator_right, 'attestation': attestation_right}, 'CurrentEpochSwayerRight')
         else:
-            self.compute_head()
+            # We can already use saved attestations by now
             current_epoch = spec.compute_epoch_at_slot(self.current_slot)
-
-            start_slot = spec.compute_start_slot_at_epoch(current_epoch)
-            ebb_root_left = self.block_root_left\
-                if start_slot == self.current_slot\
-                else spec.get_block_root(self.head_state_left, current_epoch)
-            ebb_root_right = self.block_root_right\
-                if start_slot == self.current_slot\
-                else spec.get_block_root(self.head_state_right, current_epoch)
-            
-            side = 0
-            for (validator_index, validator) in self.attesting_validators_at_slot(self.current_slot).items():
-                assert side in (0, 1)
-                if side == 0:
-                    epoch_boundary_block_root = ebb_root_left
-                    head_block = self.block_root_left
-                    head_state = self.head_state_left
-                else:
-                    epoch_boundary_block_root = ebb_root_right
-                    head_block = self.block_root_right
-                    head_state = self.head_state_right
-
-                validator_committee = self.committee[self.current_slot][validator_index][0]
-                attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state)
-                if attestation_data is None:
-                    continue
-                attestation = self.produce_attestation(attestation_data, validator_index, validator)
-                
-                bucket = self.attestations_saved_left if side == 0 else self.attestations_saved_right
-                bucket[current_epoch].put(attestation)
-                side = (side + 1) % 2
-            print(f"attestations_left=[{self.attestations_saved_left[current_epoch].qsize()}] attestations_right=[{self.attestations_saved_left[current_epoch].qsize()}]")
-
-            # Fillers (current epoch)
-            # Release one filler attestation when needed
-            for _ in range(0, self.fillers_needed_left[self.current_slot]):
-                attestation = self.attestations_saved_left[current_epoch].get()
-                self.client_to_simulator_queue.put(MessageEvent(
-                    time=self.current_time,
-                    priority=30,
-                    message=attestation.encode_bytes(),
-                    message_type='Attestation',
-                    fromidx=self.counter,
-                    toidx=None,
-                    custom_latency=0
-                ))
-                self.log(attestation, 'CurrentEpochFillerLeft')
-            for _ in range(0, self.fillers_needed_right[self.current_slot]):
-                attestation = self.attestations_saved_right[current_epoch].get()
-                self.client_to_simulator_queue.put(MessageEvent(
-                    time=self.current_time,
-                    priority=30,
-                    message=attestation.encode_bytes(),
-                    message_type='Attestation',
-                    fromidx=self.counter,
-                    toidx=None,
-                    custom_latency=0
-                ))
-                self.log(attestation, 'CurrentEpochFillerRight')
-            
-            # Swayers (current epoch)
-            for _ in self.swayers_first_epoch_left[self.current_slot - self.attack_started_slot]:
+            swayers_per_side = len(self.swayers_subsequent_epochs_left) // spec.SLOTS_PER_EPOCH
+            for _ in range(0, swayers_per_side):
                 attestation_left = self.attestations_saved_left[current_epoch].get()
                 attestation_right = self.attestations_saved_right[current_epoch].get()
                 self.distribute_targeted_message(
@@ -467,10 +495,32 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     priority=-1,
                     target_slot=self.current_slot + 1
                 )
-                self.log(attestation_left, 'CurrentEpochSwayerLeft')
-                self.log(attestation_right, 'CurrentEpochSwayerRight')
-            print(f"attestations_left=[{self.attestations_saved_left[current_epoch].qsize()}] attestations_right=[{self.attestations_saved_left[current_epoch].qsize()}]")
+                self.log({'attestation': attestation_left}, 'CurrentEpochSwayerLeftSavedLastSlot')
+                self.log({'attestation': attestation_right}, 'CurrentEpochSwayerRightSavedLastSlot')
     
+    def attest_subsequent_epoch(self):
+        self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=100, message="Subsequent epoch"))
+    
+    def send_message(self, message_type, message, toidx=None, latency=0, priority=30):
+        message = MessageEvent(
+            time=self.current_time,
+            priority=priority,
+            message=message.encode_bytes(),
+            message_type=message_type,
+            fromidx=self.counter,
+            toidx=toidx,
+            custom_latency=latency
+        )
+        self.log({
+            'from': self.counter,
+            'to': toidx,
+            'latency': latency,
+            'priority': priority,
+            'type': message_type,
+            'message': message
+        }, f"{message_type}Send")
+        self.client_to_simulator_queue.put(message)
+
     def log_sent_message(self, message: MessageEvent, tag=None):
         tag = 'MessageSent' if tag is None else tag
         self.log({

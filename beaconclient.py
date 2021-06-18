@@ -402,6 +402,12 @@ class BeaconClient(Process):
                 max(self.current_slot - 1, 0)):
             try:
                 if attestation.data.beacon_block_root in self.store.blocks:
+                    indexed = spec.get_indexed_attestation(self.head_state, attestation)
+                    self.log({
+                        'validator_estimation': indexed.attesting_indices,
+                        'slot': attestation.data.slot,
+                        'root': attestation.data.beacon_block_root
+                    }, 'AttestationProcessing')
                     spec.on_attestation(self.store, attestation)
                     self.attestation_cache.accept_attestation(attestation, forkchoice=True)
             except AssertionError:
