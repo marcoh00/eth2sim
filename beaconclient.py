@@ -89,8 +89,9 @@ class BeaconClient(Process):
         self.starttime = int(time.time())
         self.proposer_current_slot = None
         self.build_validators()
-
         self.head_state = None
+
+        self.disable_aggregation = True
 
     def log(self, obj, typ: str):
         if not self.debug:
@@ -255,7 +256,7 @@ class BeaconClient(Process):
         new_committee = dict()
         local_state = self.state if genesis else self.head_state
         local_state = head_state if head_state is not None else local_state
-        self.log(f"head_state.slot=[{local_state.slot}] based on block in slot {self.store.blocks[self.head_root].slot}", "CommitteeDecisionBase")
+        self.log(f"head_state.slot=[{local_state.slot}] based on block in slot {local_state.latest_block_header.slot}", "CommitteeDecisionBase")
         if epoch > spec.compute_epoch_at_slot(local_state.slot) + 1:
             assert False
         start_slot = spec.compute_start_slot_at_epoch(epoch)
@@ -445,6 +446,8 @@ class BeaconClient(Process):
             self.attest()
 
     def handle_aggregate_opportunity(self, message: AggregateOpportunity):
+        if self.disable_aggregation:
+            return
         if self.slot_last_attested != message.slot:
             return
         attesting_validators = self.__attesting_validators_at_current_slot()
@@ -514,7 +517,7 @@ class BeaconClient(Process):
             self.log(signed_aggregate_and_proof, 'AggregateAndProofSend')
 
     def handle_attestation(self, attestation: spec.Attestation, marker=None):
-        self.log(attestation, 'AttestationRecv')
+        self.log({'attestation': attestation, 'marker': marker, 'hash': spec.hash_tree_root(attestation)}, 'AttestationRecv')
         self.attestation_cache.add_attestation(attestation, self.store, marker=marker)
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof, marker=None):
@@ -628,16 +631,19 @@ class BeaconClient(Process):
         # noinspection PyArgumentList
         payload = decoder[message.message_type](message.message)
         # noinspection PyArgumentList
-        actions[message.message_type](payload)
+        actions[message.message_type](payload, message.marker)
 
     def attest(self):
         self.compute_head()
+        self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
         self.pre_attest()
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         if self.current_slot not in self.committee or current_epoch not in self.committee_count:
             self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
         attesting_validators = self.__attesting_validators_at_current_slot()
         self.log(attesting_validators, 'AttestingValidators')
+        if self.debug:
+            self.graph(show=False, balance=True)
         if len(attesting_validators) < 1:
             return
         
@@ -650,8 +656,6 @@ class BeaconClient(Process):
             # up until the current slot.
             spec.process_slots(head_state, self.current_slot)
             assert False
-        if self.debug:
-            self.graph(show=False, balance=True)
 
         # As specified inside validator.md spec / Attesting / Note:
         start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
@@ -732,10 +736,11 @@ class BeaconClient(Process):
     def __attesting_validators_at_current_slot(self) -> Dict[spec.ValidatorIndex, Validator]:
         return self.attesting_validators_at_slot(self.current_slot)
     
-    def attesting_validators_at_slot(self, slot: spec.Slot) -> Dict[spec.ValidatorIndex, Validator]:
+    def attesting_validators_at_slot(self, slot: spec.Slot, committee=None) -> Dict[spec.ValidatorIndex, Validator]:
+        committee = self.committee if committee is None else committee
         assert slot in self.committee
         attesting_indices = set(validator.index for validator in self.validators) \
-            .intersection(set(self.committee[slot].keys()))
+            .intersection(set(committee[slot].keys()))
         attesting_validators: Dict[spec.ValidatorIndex, Validator] = {validator.index: validator
                                                                       for validator in self.validators
                                                                       if validator.index in attesting_indices

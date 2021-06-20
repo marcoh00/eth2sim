@@ -115,6 +115,12 @@ class BalancingAttackingBeaconClient(BeaconClient):
     all_clients_left: Set[int]
     all_clients_right: Set[int]
 
+    committee_left: Dict[spec.Slot, Dict[spec.ValidatorIndex, Tuple[spec.CommitteeIndex, int, int]]]
+    committee_count_left: Dict[spec.Epoch, int]
+
+    committee_right: Dict[spec.Slot, Dict[spec.ValidatorIndex, Tuple[spec.CommitteeIndex, int, int]]]
+    committee_count_right: Dict[spec.Epoch, int]
+
     # Slot indices indicate actual slots
     beacon_clients_left: Dict[spec.Slot, Sequence[int]]
     beacon_clients_right: Dict[spec.Slot, Sequence[int]]
@@ -163,6 +169,10 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.attack_started_slot = None
         self.beacon_client_validator_map = dict()
         self.validator_beacon_client_map = dict()
+        self.committee_left = dict()
+        self.committee_right = dict()
+        self.committee_count_left = dict()
+        self.committee_count_right = dict()
         self.all_clients_left = set()
         self.all_clients_right = set()
         self.beacon_clients_left = dict()
@@ -200,7 +210,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.beacon_clients_left[slot] = list()
         self.beacon_clients_right[slot] = list()
 
-        honest_indices_inside_slot_committees = tuple(set(self.committee[slot].keys()).difference(self.indexed_validators.keys()))
+        honest_indices_inside_slot_committees = tuple(set(self.committee_left[slot].keys()).union(self.committee_right[slot].keys()).difference(self.indexed_validators.keys()))
         honest_clients_inside_slot_committees = tuple(set(self.validator_beacon_client_map[index] for index in honest_indices_inside_slot_committees))
 
         # We assert that one beacon client hosts exactly one validator
@@ -336,6 +346,15 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 self.assign(validators, slot)
             self.assign(adversarial_validators_for_last_slot, spec.Slot(spec.SLOTS_PER_EPOCH - spec.Slot(1)))
             print(f'[BEACON CLIENT 0] swayers_left_first=[{self.swayers_first_epoch_left}] swayers_right_first=[{self.swayers_first_epoch_right}] swayers_left_subsequent=[{self.swayers_subsequent_epochs_left}] swayers_right_subsequent=[{self.swayers_subsequent_epochs_right}] fillers_first_epoch=[{self.fillers_first_epoch}] fillers_subsequent_epochs=[{self.fillers_subsequent_epochs}] unparticipating=[{self.unparticipating_validators}]')
+            self.log({
+                'swayers_left_first': self.swayers_first_epoch_left,
+                'swayers_right_first': self.swayers_first_epoch_right,
+                'swayers_left_subsequent': self.swayers_subsequent_epochs_left,
+                'swayers_right_subsequent': self.swayers_subsequent_epochs_right,
+                'fillers_first_epoch': self.fillers_first_epoch,
+                'fillers_subsequent_epoch': self.fillers_subsequent_epochs,
+                'unparticipating': self.unparticipating_validators
+            }, 'AttackValidatorAssignment')
         return attack_feasible
     
     def side_with_more_weight(self) -> str:
@@ -415,6 +434,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
         - Fillers and swayers votes from the previous epoch are transmitted as needed
         """
         self.compute_head()
+
         if not self.AttackState.attack_running(self.attack_state):
             super().attest()
         elif self.attack_state == self.AttackState.ATTACK_STARTED_SUBSEQUENT_EPOCHS:
@@ -432,9 +452,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
             if start_slot == self.current_slot\
             else spec.get_block_root(self.head_state_left, current_epoch)
         
-        validator_committee = self.committee[self.current_slot][validator_index][0]
-        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_left, self.state_left)
-        return self.produce_attestation(attestation_data, validator_index, validator)
+        validator_committee = self.committee_left[self.current_slot][validator_index][0]
+        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_left, self.head_state_left)
+        return self.produce_attestation(attestation_data, validator_index, validator, custom_committee=self.committee_left)
 
     def get_attestation_right(self, validator_index: spec.ValidatorIndex) -> spec.Attestation:
         validator = self.indexed_validators[validator_index]
@@ -445,22 +465,33 @@ class BalancingAttackingBeaconClient(BeaconClient):
             if start_slot == self.current_slot\
             else spec.get_block_root(self.head_state_right, current_epoch)
         
-        validator_committee = self.committee[self.current_slot][validator_index][0]
-        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_right, self.state_right)
-        return self.produce_attestation(attestation_data, validator_index, validator)
+        validator_committee = self.committee_right[self.current_slot][validator_index][0]
+        attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, self.block_root_right, self.head_state_right)
+        return self.produce_attestation(attestation_data, validator_index, validator, custom_committee=self.committee_right)
     
     def save_votes(self):
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
-        for validator_index in self.attesting_validators_at_slot(self.current_slot).keys():
-            if validator_index in self.swayers_subsequent_epochs_left:
-                self.attestations_saved_left[current_epoch].put((self.get_attestation_left(validator_index), validator_index))
-            if validator_index in self.swayers_subsequent_epochs_right\
-                or validator_index in self.fillers_subsequent_epochs:
-                self.attestations_saved_right[current_epoch].put((self.get_attestation_right(validator_index), validator_index))
+        reverse_swayer_side = current_epoch % 2 == 0
+
+        for attesting_validator_left in self.attesting_validators_at_slot(self.current_slot, committee=self.committee_left).keys():
+            assert self.head_state_left.slot == self.current_slot
+            assert self.head_state_left.latest_block_header.slot == self.store.blocks[self.block_root_left].slot
+            swayer_set = self.swayers_subsequent_epochs_right if reverse_swayer_side else self.swayers_subsequent_epochs_left
+            if attesting_validator_left in swayer_set:
+                self.attestations_saved_left[current_epoch].put((self.get_attestation_left(attesting_validator_left), attesting_validator_left))
+        
+        for attesting_validator_right in self.attesting_validators_at_slot(self.current_slot, committee=self.committee_right).keys():
+            assert self.head_state_right.slot == self.current_slot
+            assert self.head_state_right.latest_block_header.slot == self.store.blocks[self.block_root_right].slot
+            swayer_set = self.swayers_subsequent_epochs_left if reverse_swayer_side else self.swayers_subsequent_epochs_right
+            if attesting_validator_right in swayer_set:
+                self.attestations_saved_right[current_epoch].put((self.get_attestation_right(attesting_validator_right), attesting_validator_right))
+        
         self.log({
             'epoch': current_epoch,
             'left': self.attestations_saved_left[current_epoch].qsize(),
-            'right': self.attestations_saved_right[current_epoch].qsize()
+            'right': self.attestations_saved_right[current_epoch].qsize(),
+            'reversed': reverse_swayer_side
         }, 'SavedAttestationsAvailable')
         print(f"attestations_left=[{self.attestations_saved_left[current_epoch].qsize()}] attestations_right=[{self.attestations_saved_right[current_epoch].qsize()}]")
     
@@ -487,7 +518,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
             self.log({'validator': validator, 'attestation': attestation}, 'CurrentEpochFillerRight')
         
         # Swayers for next slot
-        if slot_inside_epoch != 7:
+        if slot_inside_epoch != spec.SLOTS_PER_EPOCH - 1:
             assert len(self.swayers_first_epoch_left[slot_inside_epoch]) == len(self.swayers_first_epoch_right[slot_inside_epoch])
             for validator_left, validator_right in zip(self.swayers_first_epoch_left[slot_inside_epoch], self.swayers_first_epoch_right[slot_inside_epoch]):
                 attestation_left = self.get_attestation_left(validator_left)
@@ -683,7 +714,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
         }
         self.log(decoder[message_type].decode_bytes(left_message), 'TargetedMessageLeft')
         self.log(decoder[message_type].decode_bytes(right_message), 'TargetedMessageRight')
-        for beacon_client in self.beacon_clients_left[target_slot]:
+        for beacon_client in self.all_clients_left:
             if left_message is not None:
                 message = MessageEvent(
                     time=self.current_time,
@@ -694,7 +725,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentLeftToLeft')
                 self.client_to_simulator_queue.put(message)
             if right_message is not None:
                 message = MessageEvent(
@@ -706,9 +737,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency_otherside
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentLeftToRight')
                 self.client_to_simulator_queue.put(message)
-        for beacon_client in self.beacon_clients_right[target_slot]:
+        for beacon_client in self.all_clients_right:
             if left_message is not None:
                 message = MessageEvent(
                     time=self.current_time,
@@ -719,7 +750,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency_otherside
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentRightToLeft')
                 self.client_to_simulator_queue.put(message)
             if right_message is not None:
                 message = MessageEvent(
@@ -731,9 +762,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentRightToRight')
                 self.client_to_simulator_queue.put(message)
-        for beacon_client in self.beacon_clients_neither[target_slot]:
+        for beacon_client in set(self.beacon_clients_neither[target_slot]).difference(self.all_clients_left).difference(self.all_clients_right):
             if left_message is not None:
                 message = MessageEvent(
                     time=self.current_time,
@@ -744,7 +775,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentNeitherLeft')
                 self.client_to_simulator_queue.put(message)
             if right_message is not None:
                 message = MessageEvent(
@@ -756,7 +787,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=beacon_client,
                     custom_latency=latency
                 )
-                self.log_sent_message(message, f'{message_type}Sent')
+                self.log_sent_message(message, f'{message_type}SentNeitherRight')
                 self.client_to_simulator_queue.put(message)
         if left_message is not None:
             message = MessageEvent(
@@ -768,7 +799,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=self.counter,
                     custom_latency=0
             )
-            self.log_sent_message(message, f'{message_type}Sent')
+            self.log_sent_message(message, f'{message_type}SentSelfLeft')
             self.client_to_simulator_queue.put(message)
         if right_message is not None:
             message = MessageEvent(
@@ -780,7 +811,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     toidx=self.counter,
                     custom_latency=0
             )
-            self.log_sent_message(message, f'{message_type}Sent')
+            self.log_sent_message(message, f'{message_type}SentSelfRight')
             self.client_to_simulator_queue.put(message)
     
     def compute_head(self):
@@ -801,8 +832,34 @@ class BalancingAttackingBeaconClient(BeaconClient):
             self.log({
                 'state_left_slot': self.state_left.slot,
                 'state_right_slot': self.state_right.slot,
+                'head_state_left_slot': self.head_state_left.slot,
+                'head_state_right_slot': self.head_state_right.slot,
                 'block_root_left': self.block_root_left,
                 'block_root_right': self.block_root_right,
                 'first_block_left': self.first_block_root_left,
                 'first_block_right': self.first_block_root_right
             }, 'SplittedStates')
+    
+    def update_committee(self, epoch: spec.Epoch, genesis=False):
+        super().update_committee(epoch, genesis)
+        if self.block_root_left in self.store.block_states and self.block_root_right in self.store.block_states:
+            committee_count_per_slot_left, new_committee_left = self.get_committee(epoch, genesis=genesis, head_state=self.head_state_left)
+            committee_count_per_slot_right, new_committee_right = self.get_committee(epoch, genesis=genesis, head_state=self.head_state_right)
+            self.committee_count_left[epoch] = committee_count_per_slot_left
+            self.committee_count_right[epoch] = committee_count_per_slot_right
+            for slot in new_committee_left.keys():
+                self.committee_left[slot] = new_committee_left[slot]
+                self.committee_right[slot] = new_committee_right[slot]
+                self.log({
+                    'slot': slot,
+                    'left': str(new_committee_left[slot]),
+                    'right': str(new_committee_right[slot])
+                }, 'BalancingCommittee')
+        else:
+            self.log('Fallback to default committee', 'BalancingCommittee')
+            for slot in self.committee.keys():
+                self.committee_left[slot] = self.committee[slot]
+                self.committee_right[slot] = self.committee[slot]
+            for epoch in self.committee_count.keys():
+                self.committee_count_left[epoch] = self.committee_count[epoch]
+                self.committee_count_right[epoch] = self.committee_count[epoch]
