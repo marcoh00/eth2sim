@@ -112,6 +112,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
     beacon_client_validator_map: Dict[int, Sequence[spec.ValidatorIndex]]
     validator_beacon_client_map: Dict[spec.ValidatorIndex, int]
 
+    all_clients_left: Set[int]
+    all_clients_right: Set[int]
+
     # Slot indices indicate actual slots
     beacon_clients_left: Dict[spec.Slot, Sequence[int]]
     beacon_clients_right: Dict[spec.Slot, Sequence[int]]
@@ -160,6 +163,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
         self.attack_started_slot = None
         self.beacon_client_validator_map = dict()
         self.validator_beacon_client_map = dict()
+        self.all_clients_left = set()
+        self.all_clients_right = set()
         self.beacon_clients_left = dict()
         self.beacon_clients_right = dict()
         self.beacon_clients_neither = dict()
@@ -202,17 +207,29 @@ class BalancingAttackingBeaconClient(BeaconClient):
         # TODO remove this constraint and try to construct two buckets
         assert len(honest_clients_inside_slot_committees) == len(honest_indices_inside_slot_committees)
 
-        honest_indices_len = len(honest_indices_inside_slot_committees)
-        honest_indices_len_even = honest_indices_len % 2 == 0
-        honest_indices_upto = honest_indices_len if honest_indices_len_even else honest_indices_len - 1
-        for i in range(0, honest_indices_upto, 2):
+        unknown_side_clients = list()        
+        for honest_index in honest_clients_inside_slot_committees:
+            if honest_index in self.all_clients_left:
+                self.beacon_clients_left[slot].append(honest_index)
+            elif honest_index in self.all_clients_right:
+                self.beacon_clients_right[slot].append(honest_index)
+            else:
+                unknown_side_clients.append(honest_index)
+        
+        unknown_side_clients_len = len(unknown_side_clients)
+        unknown_side_clients_len_even = unknown_side_clients_len % 2 == 0
+        unknown_side_clients_indices_upto = unknown_side_clients_len if unknown_side_clients_len_even else unknown_side_clients_len - 1
+        for i in range(0, unknown_side_clients_indices_upto, 2):
             self.beacon_clients_left[slot].append(honest_clients_inside_slot_committees[i])
+            self.all_clients_left.add(honest_clients_inside_slot_committees[i])
             self.beacon_clients_right[slot].append(honest_clients_inside_slot_committees[i + 1])
+            self.all_clients_right.add(honest_clients_inside_slot_committees[i + 1])
         
         self.fillers_needed_left[slot] = 0
         self.fillers_needed_right[slot] = 0
-        if not honest_indices_len_even:
+        if not unknown_side_clients_len_even:
             self.beacon_clients_left[slot].append(honest_clients_inside_slot_committees[-1])
+            self.all_clients_left.add(honest_clients_inside_slot_committees[-1])
             self.fillers_needed_right[slot] = 1
         self.beacon_clients_neither[slot] = tuple(set(self.beacon_client_validator_map.keys()).difference(honest_clients_inside_slot_committees).difference((self.counter,)))
 
@@ -220,6 +237,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
             'slot': slot,
             'beacon_clients_left': self.beacon_clients_left[slot],
             'beacon_clients_right': self.beacon_clients_right[slot],
+            'all_clients_left': self.all_clients_left,
+            'all_clients_right': self.all_clients_right,
             'validators_left': tuple(self.beacon_client_validator_map[beacon_client] for beacon_client in self.beacon_clients_left[slot]),
             'validators_right': tuple(self.beacon_client_validator_map[beacon_client] for beacon_client in self.beacon_clients_right[slot]),
             'beacon_clients_neither': self.beacon_clients_neither[slot],
