@@ -130,8 +130,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
     fillers_first_epoch: Dict[spec.Slot, Sequence[spec.ValidatorIndex]]
     fillers_subsequent_epochs: Set[spec.ValidatorIndex]
 
-    attestations_saved_left: Dict[spec.Epoch, Queue[spec.Attestation]]
-    attestations_saved_right: Dict[spec.Epoch, Queue[spec.Attestation]]
+    attestations_saved_left: Dict[spec.Epoch, Queue[Tuple[spec.Attestation, spec.ValidatorIndex]]]
+    attestations_saved_right: Dict[spec.Epoch, Queue[Tuple[spec.Attestation, spec.ValidatorIndex]]]
 
     state_left: Optional[spec.BeaconState]
     head_state_left: Optional[spec.BeaconState]
@@ -245,9 +245,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
         assert spec.compute_start_slot_at_epoch(epoch) == self.current_slot
         self.attestations_saved_left[epoch] = Queue()
         self.attestations_saved_right[epoch] = Queue()
+        self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
+        self.update_committee(spec.compute_epoch_at_slot(self.current_slot + spec.SLOTS_PER_EPOCH))
         for slot_i in range(self.current_slot, self.current_slot + (2 * spec.SLOTS_PER_EPOCH)):
-            self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
-            self.update_committee(spec.compute_epoch_at_slot(self.current_slot + spec.SLOTS_PER_EPOCH))
             self.determine_positition_of_beacon_clients(spec.Slot(slot_i))
         if self.attack_state == self.AttackState.ATTACK_PLANNED:
             feasible = self.is_attack_feasible()
@@ -434,10 +434,15 @@ class BalancingAttackingBeaconClient(BeaconClient):
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
         for validator_index in self.attesting_validators_at_slot(self.current_slot).keys():
             if validator_index in self.swayers_subsequent_epochs_left:
-                self.attestations_saved_left[current_epoch].put(self.get_attestation_left(validator_index))
+                self.attestations_saved_left[current_epoch].put((self.get_attestation_left(validator_index), validator_index))
             if validator_index in self.swayers_subsequent_epochs_right\
                 or validator_index in self.fillers_subsequent_epochs:
-                self.attestations_saved_right[current_epoch].put(self.get_attestation_right(validator_index))
+                self.attestations_saved_right[current_epoch].put((self.get_attestation_right(validator_index), validator_index))
+        self.log({
+            'epoch': current_epoch,
+            'left': self.attestations_saved_left[current_epoch].qsize(),
+            'right': self.attestations_saved_right[current_epoch].qsize()
+        }, 'SavedAttestationsAvailable')
         print(f"attestations_left=[{self.attestations_saved_left[current_epoch].qsize()}] attestations_right=[{self.attestations_saved_right[current_epoch].qsize()}]")
     
     def attest_first_epoch(self):
@@ -451,7 +456,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 message=attestation,
                 toidx=None
             )
-            self.log(attestation, 'CurrentEpochFillerLeft')
+            self.log({'validator': validator, 'attestation': attestation}, 'CurrentEpochFillerLeft')
         for _ in range(0, self.fillers_needed_right[self.current_slot]):
             validator = self.fillers_first_epoch[slot_inside_epoch].pop()
             attestation = self.get_attestation_right(validator)
@@ -484,8 +489,8 @@ class BalancingAttackingBeaconClient(BeaconClient):
             current_epoch = spec.compute_epoch_at_slot(self.current_slot)
             swayers_per_side = len(self.swayers_subsequent_epochs_left) // spec.SLOTS_PER_EPOCH
             for _ in range(0, swayers_per_side):
-                attestation_left = self.attestations_saved_left[current_epoch].get()
-                attestation_right = self.attestations_saved_right[current_epoch].get()
+                attestation_left, validator_left = self.attestations_saved_left[current_epoch].get()
+                attestation_right, validator_right = self.attestations_saved_right[current_epoch].get()
                 self.distribute_targeted_message(
                     message_type='Attestation',
                     left_message=attestation_left.encode_bytes(),
@@ -495,11 +500,48 @@ class BalancingAttackingBeaconClient(BeaconClient):
                     priority=-1,
                     target_slot=self.current_slot + 1
                 )
-                self.log({'attestation': attestation_left}, 'CurrentEpochSwayerLeftSavedLastSlot')
-                self.log({'attestation': attestation_right}, 'CurrentEpochSwayerRightSavedLastSlot')
+                self.log({'validator': validator_left, 'attestation': attestation_left}, 'CurrentEpochSwayerLeftSavedLastSlot')
+                self.log({'validator': validator_right, 'attestation': attestation_right}, 'CurrentEpochSwayerRightSavedLastSlot')
     
     def attest_subsequent_epoch(self):
-        self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=100, message="Subsequent epoch"))
+        current_epoch = spec.compute_epoch_at_slot(self.current_slot)
+        slot_inside_epoch = self.current_slot % spec.SLOTS_PER_EPOCH
+        attestation_epoch = current_epoch if slot_inside_epoch == (spec.SLOTS_PER_EPOCH - 1) else current_epoch - 1
+
+        self.log(attestation_epoch, 'AttestationEpochForSubsequentEpoch')
+
+        for _ in range(0, self.fillers_needed_left[self.current_slot]):
+            attestation, validator = self.attestations_saved_left[attestation_epoch].get()
+            self.send_message(
+                message_type='Attestation',
+                message=attestation,
+                toidx=None
+            )
+            self.log({'validator': validator, 'attestation': attestation}, 'SubsequentEpochFillerLeft')
+        for _ in range(0, self.fillers_needed_right[self.current_slot]):
+            attestation, validator = self.attestations_saved_right[attestation_epoch].get()
+            self.send_message(
+                message_type='Attestation',
+                message=attestation,
+                toidx=None
+            )
+            self.log({'validator': validator, 'attestation': attestation}, 'SubsequentEpochFillerRight')
+        
+        swayers_per_side = len(self.swayers_subsequent_epochs_left) // spec.SLOTS_PER_EPOCH
+        for _ in range(0, swayers_per_side):
+            attestation_left, validator_left = self.attestations_saved_left[attestation_epoch].get()
+            attestation_right, validator_right = self.attestations_saved_right[attestation_epoch].get()
+            self.distribute_targeted_message(
+                message_type='Attestation',
+                left_message=attestation_left.encode_bytes(),
+                right_message=attestation_right.encode_bytes(),
+                latency=4,
+                latency_otherside=10,
+                priority=-1,
+                target_slot=self.current_slot + 1
+            )
+            self.log({'validator': validator_left, 'attestation': attestation_left}, 'SubsequentEpochSwayerLeft')
+            self.log({'validator': validator_right, 'attestation': attestation_right}, 'SubsequentEpochSwayerRight')
     
     def send_message(self, message_type, message, toidx=None, latency=0, priority=30):
         message = MessageEvent(
@@ -613,6 +655,15 @@ class BalancingAttackingBeaconClient(BeaconClient):
     
     def distribute_targeted_message(self, message_type, left_message, right_message, latency=0, latency_otherside=5, priority=20, target_slot=None):
         target_slot = self.current_slot if target_slot is None else target_slot
+        decoder = {
+            'Attestation': spec.Attestation,
+            'SignedAggregateAndProof': spec.SignedAggregateAndProof,
+            'SignedBeaconBlock': spec.SignedBeaconBlock,
+            'BeaconBlock': spec.BeaconBlock,
+            'BeaconState': spec.BeaconState
+        }
+        self.log(decoder[message_type].decode_bytes(left_message), 'TargetedMessageLeft')
+        self.log(decoder[message_type].decode_bytes(right_message), 'TargetedMessageRight')
         for beacon_client in self.beacon_clients_left[target_slot]:
             if left_message is not None:
                 message = MessageEvent(
