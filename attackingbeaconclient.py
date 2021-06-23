@@ -535,7 +535,9 @@ class BalancingAttackingBeaconClient(BeaconClient):
                 self.log({'validator': validator_left, 'attestation': attestation_left}, 'CurrentEpochSwayerLeft')
                 self.log({'validator': validator_right, 'attestation': attestation_right}, 'CurrentEpochSwayerRight')
         else:
-            # We can already use saved attestations by now
+            # This is the last slot of the epoch and every swayer for subsequent epochs
+            # should have already saved one vote by now.
+            # This means we can already use two saved votes to sway the honest clients.
             current_epoch = spec.compute_epoch_at_slot(self.current_slot)
             swayers_per_side = len(self.swayers_subsequent_epochs_left) // spec.SLOTS_PER_EPOCH
             for _ in range(0, swayers_per_side):
