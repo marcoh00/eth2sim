@@ -249,7 +249,7 @@ def simulation15(config, blockhash):
 
 def simulation16(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
-        .set_end_time(calc_simtime(slot=1, epoch=13))\
+        .set_end_time(calc_simtime(slot=1, epoch=4))\
         .set_custom_latency_map(((0, 0),))\
         .beacon_client(1)\
             .set_debug(True)\
