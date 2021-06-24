@@ -91,7 +91,7 @@ class BeaconClient(Process):
         self.build_validators()
         self.head_state = None
 
-        self.disable_aggregation = True
+        self.disable_aggregation = False
 
     def log(self, obj, typ: str):
         if not self.debug:
