@@ -1,3 +1,6 @@
+import sys
+import traceback
+
 from queue import Queue
 from eth2spec.phase0 import spec
 from events import AggregateOpportunity, Event, LatestVoteOpportunity, NextSlotEvent, SimulationEndEvent, BeaconClientInfo, MessageEvent
@@ -667,7 +670,7 @@ class BalancingAttackingBeaconClient(BeaconClient):
             traceback.print_tb(tb)
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            self.__debug({'text': text, 'block': str(block), 'validators': str(validator_status)}, 'FindNewStateRootError')
+            self.__debug({'text': text, 'block_left': str(block_left), 'block_right': str(block_right), 'validators': str(validator_status)}, 'FindNewStateRootError')
             self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=0, message=text))
             return
         

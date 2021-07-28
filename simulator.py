@@ -326,14 +326,16 @@ class Simulator:
             if element.time == self.simulator_time and element.priority == self.simulator_prio:
                 yield element
             elif element.time == self.simulator_time and element.priority < self.simulator_prio:
+                # This is expected to happen when Balancing Attacking clients take part in the simulation
+                # If it happens otherwise, it is probably a bug and should be investigated
                 print(f"[WARNING] Priority downgrade ({self.simulator_prio} -> {element.priority})")
-                print(f'Current: {element}')
-                print(f'Previous: {self.element_cache}')
+                # print(f'Current: {element}')
+                # print(f'Previous: {self.element_cache}')
                 self.simulator_prio = element.priority
                 yield element
             elif element.time < self.simulator_time:
                 print(f'[WARNING] element.time is before simulator_time! {str(element)}')
-                # TODO FIX THIS!!!
+                # This should not happen. Investigate if it does.
                 element.time = self.simulator_time
                 yield element
             else:
