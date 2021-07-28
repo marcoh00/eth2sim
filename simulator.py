@@ -14,8 +14,20 @@ from beaconclient_builder import BeaconClientBuilder
 from builder import Builder
 from eth2spec.phase0 import spec
 from eth2spec.test.helpers.deposits import build_deposit, build_deposit_data
-from events import NextSlotEvent, BeaconClientInfo, LatestVoteOpportunity, AggregateOpportunity, SimulationEndEvent, MessageEvent, \
-    Event, MESSAGE_TYPE, ProduceGraphEvent, ProduceStatisticsEvent, TargetedEvent, ValidatorInitializationEvent
+from events import (
+    NextSlotEvent,
+    BeaconClientInfo,
+    LatestVoteOpportunity,
+    AggregateOpportunity,
+    SimulationEndEvent,
+    MessageEvent,
+    Event,
+    MESSAGE_TYPE,
+    ProduceGraphEvent,
+    ProduceStatisticsEvent,
+    TargetedEvent,
+    ValidatorInitializationEvent,
+)
 from helpers import initialize_beacon_state_from_mocked_eth1, queue_element_or_none
 from network import Network
 
@@ -42,16 +54,25 @@ class Simulator:
     queue: Queue
     should_quit: bool
 
-    def __init__(self,
-                 rand: ByteVector,
-                 custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None,
-                 latency_modifier: Optional[Callable[[int], int]] = None):
+    def __init__(
+        self,
+        rand: ByteVector,
+        custom_latency_map: Optional[
+            Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]
+        ] = None,
+        latency_modifier: Optional[Callable[[int], int]] = None,
+    ):
         self.genesis_time = spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY
         self.simulator_time = self.genesis_time.copy()
-        self.simulator_prio = 2**64 - 1
+        self.simulator_prio = 2 ** 64 - 1
         self.slot = spec.Slot(0)
         self.clients = []
-        self.network = Network(self, int.from_bytes(rand[0:4], "little"), custom_latency_map, latency_modifier)
+        self.network = Network(
+            self,
+            int.from_bytes(rand[0:4], "little"),
+            custom_latency_map,
+            latency_modifier,
+        )
         self.events = queue.PriorityQueue()
         self.past_events = list()
         self.random = rand
@@ -64,35 +85,44 @@ class Simulator:
     def next_slot_event(self):
         self.events.put(
             NextSlotEvent(
-                self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + spec.SECONDS_PER_SLOT,
+                self.genesis_time
+                + (self.slot * spec.SECONDS_PER_SLOT)
+                + spec.SECONDS_PER_SLOT,
                 0,
-                self.slot + 1)
+                self.slot + 1,
+            )
         )
 
     def next_latest_vote_opportunity(self):
         self.events.put(
-             LatestVoteOpportunity(
-                 self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + (spec.SECONDS_PER_SLOT // 3),
-                 0,
-                 self.slot)
+            LatestVoteOpportunity(
+                self.genesis_time
+                + (self.slot * spec.SECONDS_PER_SLOT)
+                + (spec.SECONDS_PER_SLOT // 3),
+                0,
+                self.slot,
+            )
         )
 
     def next_aggregate_opportunity(self):
         self.events.put(
-             AggregateOpportunity(
-                 self.genesis_time + (self.slot * spec.SECONDS_PER_SLOT) + (2 * (spec.SECONDS_PER_SLOT // 3)),
-                 0,
-                 self.slot)
+            AggregateOpportunity(
+                self.genesis_time
+                + (self.slot * spec.SECONDS_PER_SLOT)
+                + (2 * (spec.SECONDS_PER_SLOT // 3)),
+                0,
+                self.slot,
+            )
         )
 
-    def read_genesis(self, filename=''):
-        print('[SIMULATOR] Read Genesis State and Block from file')
+    def read_genesis(self, filename=""):
+        print("[SIMULATOR] Read Genesis State and Block from file")
         state_file = Path(f"state_{filename}.ssz")
         block_file = Path(f"block_{filename}.ssz")
-        with open(state_file, 'rb') as fp:
+        with open(state_file, "rb") as fp:
             encoded_state = fp.read()
             self.genesis_state = spec.BeaconState.decode_bytes(encoded_state)
-        with open(block_file, 'rb') as fp:
+        with open(block_file, "rb") as fp:
             encoded_block = fp.read()
             self.genesis_block = spec.BeaconBlock.decode_bytes(encoded_block)
 
@@ -100,7 +130,9 @@ class Simulator:
         deposit_data = []
         deposits = []
 
-        print(f'[SIMULATOR] Generate Genesis state ({sum(len(client.beacon_client.validators) for client in self.clients)} validators)')
+        print(
+            f"[SIMULATOR] Generate Genesis state ({sum(len(client.beacon_client.validators) for client in self.clients)} validators)"
+        )
         validatorno = 0
         start_time = datetime.datetime.now()
         eth1_timestamp = spec.MIN_GENESIS_TIME
@@ -114,12 +146,18 @@ class Simulator:
                         pubkey=validator.pubkey,
                         privkey=validator.privkey,
                         amount=validator.startbalance,
-                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
-                        signed=True
+                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX
+                        + spec.hash(validator.pubkey)[1:],
+                        signed=True,
                     )
                     deposit = spec.Deposit(
-                        proof=list(bytes.fromhex('0000000000000000000000000000000000000000000000000000000000000000') for _ in range(0, spec.DEPOSIT_CONTRACT_TREE_DEPTH + 1)),
-                        data=deposit_data
+                        proof=list(
+                            bytes.fromhex(
+                                "0000000000000000000000000000000000000000000000000000000000000000"
+                            )
+                            for _ in range(0, spec.DEPOSIT_CONTRACT_TREE_DEPTH + 1)
+                        ),
+                        data=deposit_data,
                     )
                 else:
                     deposit, root, deposit_data = build_deposit(
@@ -128,28 +166,35 @@ class Simulator:
                         pubkey=validator.pubkey,
                         privkey=validator.privkey,
                         amount=validator.startbalance,
-                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX + spec.hash(validator.pubkey)[1:],
-                        signed=True
-                )
+                        withdrawal_credentials=spec.BLS_WITHDRAWAL_PREFIX
+                        + spec.hash(validator.pubkey)[1:],
+                        signed=True,
+                    )
                 deposits.append(deposit)
                 validatorno += 1
 
         if mocked:
-            self.genesis_state = initialize_beacon_state_from_mocked_eth1(spec, self.random, eth1_timestamp, deposits)
+            self.genesis_state = initialize_beacon_state_from_mocked_eth1(
+                spec, self.random, eth1_timestamp, deposits
+            )
         else:
-            self.genesis_state = spec.initialize_beacon_state_from_eth1(self.random, eth1_timestamp, deposits)
+            self.genesis_state = spec.initialize_beacon_state_from_eth1(
+                self.random, eth1_timestamp, deposits
+            )
         assert spec.is_valid_genesis_state(self.genesis_state)
-        self.genesis_block = spec.BeaconBlock(state_root=spec.hash_tree_root(self.genesis_state))
-        print('[SIMULATOR] Genesis generation successful')
+        self.genesis_block = spec.BeaconBlock(
+            state_root=spec.hash_tree_root(self.genesis_state)
+        )
+        print("[SIMULATOR] Genesis generation successful")
 
         if filename is not None:
-            print('[SIMULATOR] Export Genesis State and Block to file')
+            print("[SIMULATOR] Export Genesis State and Block to file")
             mocked = "mocked_" if mocked else ""
             state_file = f"state_{mocked}{filename}.ssz"
             block_file = f"block_{mocked}{filename}.ssz"
-            with open(state_file, 'wb') as fp:
+            with open(state_file, "wb") as fp:
                 fp.write(self.genesis_state.encode_bytes())
-            with open(block_file, 'wb') as fp:
+            with open(block_file, "wb") as fp:
                 fp.write(self.genesis_block.encode_bytes())
 
     @staticmethod
@@ -161,7 +206,7 @@ class Simulator:
             return client.validators[0].counter, client.validators[0].counter
         else:
             return client.validators[0].counter, client.validators[-1].counter
-    
+
     def beacon_client_info(self) -> Dict[int, List[int]]:
         beacon_clients = dict()
         for client in self.clients:
@@ -174,10 +219,13 @@ class Simulator:
         encoded_state = self.genesis_state.encode_bytes()
         encoded_block = self.genesis_block.encode_bytes()
         beacon_client_info = self.beacon_client_info()
-        print('[SIMULATOR] state_root={} block_root={}'.format(
-            spec.hash_tree_root(self.genesis_state), spec.hash_tree_root(self.genesis_block)
-        ))
-        print('[SIMULATOR] Start Validator processes')
+        print(
+            "[SIMULATOR] state_root={} block_root={}".format(
+                spec.hash_tree_root(self.genesis_state),
+                spec.hash_tree_root(self.genesis_block),
+            )
+        )
+        print("[SIMULATOR] Start Validator processes")
         for client in self.clients:
             # Delete all validators inside the client and tell it to initialize them again
             # This is a lot faster than serializing the existing validator objects and sending them
@@ -185,43 +233,52 @@ class Simulator:
             client.beacon_client.validators = []
             client.beacon_client.start()
 
-            print(f'[SIMULATOR] Beacon Client {client.beacon_client.counter} started')
-            client.queue.put(ValidatorInitializationEvent(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
-                priority=0
-            ))
-            client.queue.put(BeaconClientInfo(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
-                priority=5,
-                beacon_clients=beacon_client_info
-            ))
-            client.queue.put(MessageEvent(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
-                priority=10,
-                message=encoded_state,
-                message_type='BeaconState',
-                fromidx=0,
-                toidx=None
-            ))
-            client.queue.put(MessageEvent(
-                time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
-                priority=20,
-                message=encoded_block,
-                message_type='BeaconBlock',
-                fromidx=0,
-                toidx=None
-            ))
+            print(f"[SIMULATOR] Beacon Client {client.beacon_client.counter} started")
+            client.queue.put(
+                ValidatorInitializationEvent(
+                    time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY), priority=0
+                )
+            )
+            client.queue.put(
+                BeaconClientInfo(
+                    time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                    priority=5,
+                    beacon_clients=beacon_client_info,
+                )
+            )
+            client.queue.put(
+                MessageEvent(
+                    time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                    priority=10,
+                    message=encoded_state,
+                    message_type="BeaconState",
+                    fromidx=0,
+                    toidx=None,
+                )
+            )
+            client.queue.put(
+                MessageEvent(
+                    time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
+                    priority=20,
+                    message=encoded_block,
+                    message_type="BeaconBlock",
+                    fromidx=0,
+                    toidx=None,
+                )
+            )
         for client in self.clients:
             client.queue.join()
 
         self.next_latest_vote_opportunity()
         self.next_aggregate_opportunity()
         self.next_slot_event()
-        print('[SIMULATOR] Initialization complete')
+        print("[SIMULATOR] Initialization complete")
 
     def handle_next_slot_event(self, event: NextSlotEvent):
         if event.slot % spec.SLOTS_PER_EPOCH == 0:
-            print(f"---------- EPOCH {spec.compute_epoch_at_slot(spec.Slot(event.slot))} ----------")
+            print(
+                f"---------- EPOCH {spec.compute_epoch_at_slot(spec.Slot(event.slot))} ----------"
+            )
         print(f"!!! SLOT {event.slot} !!!")
         self.slot += 1
         self.next_latest_vote_opportunity()
@@ -231,7 +288,7 @@ class Simulator:
 
     def __distribute_end_event(self, event: SimulationEndEvent):
         if event.message:
-            print(f'---------- !!!!! {event.message} !!!!! ----------')
+            print(f"---------- !!!!! {event.message} !!!!! ----------")
         self.should_quit = True
         self.__distribute_event(event)
 
@@ -244,13 +301,15 @@ class Simulator:
 
     def __distribute_targeted_event(self, event: TargetedEvent):
         if event.toidx is None:
-            raise ValueError('Event must have a receiver at this point')
+            raise ValueError("Event must have a receiver at this point")
         else:
             self.__distribute_event(event, event.toidx)
 
     def __recv_message_event(self, event: MessageEvent):
-        if event.message_type == 'SignedBeaconBlock':
-            print(f"[{int(datetime.datetime.now().timestamp())}] Block Message {id(event)} by Beacon Client {event.fromidx}")
+        if event.message_type == "SignedBeaconBlock":
+            print(
+                f"[{int(datetime.datetime.now().timestamp())}] Block Message {id(event)} by Beacon Client {event.fromidx}"
+            )
         if event.toidx is not None:
             self.network.delay(event)
             self.events.put(event)
@@ -263,7 +322,7 @@ class Simulator:
                     message_type=event.message_type,
                     fromidx=event.fromidx,
                     marker=event.marker,
-                    toidx=index
+                    toidx=index,
                 )
                 self.network.delay(event_with_receiver)
                 self.events.put(event_with_receiver)
@@ -273,7 +332,7 @@ class Simulator:
             validator.queue.put(event)
             validator.beacon_client.join()
         if event.message:
-            print(f'---------- !!!!! {event.message} !!!!! ----------')
+            print(f"---------- !!!!! {event.message} !!!!! ----------")
         self.should_quit = True
 
     def start_simulation(self):
@@ -284,11 +343,11 @@ class Simulator:
             MessageEvent: self.__distribute_targeted_event,
             ProduceStatisticsEvent: self.__distribute_targeted_event,
             ProduceGraphEvent: self.__distribute_targeted_event,
-            SimulationEndEvent: self.__distribute_end_event
+            SimulationEndEvent: self.__distribute_end_event,
         }
         recv_actions = {
             MessageEvent: self.__recv_message_event,
-            SimulationEndEvent: self.__recv_end_event
+            SimulationEndEvent: self.__recv_end_event,
         }
 
         self.start_time = datetime.datetime.now()
@@ -298,9 +357,13 @@ class Simulator:
             top = self.events.get()
             self.simulator_time = top.time
             self.simulator_prio = top.priority
-            print(f'[{simtime(self.start_time)}] Current time: {self.simulator_time} '
-                  f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
-            current_time_and_prio_events = list(self.__collect_events_upto_current_time_and_prio())
+            print(
+                f"[{simtime(self.start_time)}] Current time: {self.simulator_time} "
+                f"({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)"
+            )
+            current_time_and_prio_events = list(
+                self.__collect_events_upto_current_time_and_prio()
+            )
             current_time_and_prio_events.append(top)
             while len(current_time_and_prio_events) >= 1:
                 for event in current_time_and_prio_events:
@@ -314,27 +377,45 @@ class Simulator:
                         # noinspection PyArgumentList
                         recv_actions[type(recv_event)](recv_event)
                         if recv_event.time < self.simulator_time:
-                            print(f'[{simtime(self.start_time)}][WARNING] Shall distribute event for the past! {recv_event}')
+                            print(
+                                f"[{simtime(self.start_time)}][WARNING] Shall distribute event for the past! {recv_event}"
+                            )
                         recv_event = queue_element_or_none(self.queue)
-                current_time_and_prio_events = tuple(self.__collect_events_upto_current_time_and_prio())
-        print(f'[{simtime(self.start_time)}] [SIMULATOR] FINISH SIMULATION AT TIMESTAMP {self.simulator_time} '
-              f'({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)')
+                current_time_and_prio_events = tuple(
+                    self.__collect_events_upto_current_time_and_prio()
+                )
+        print(
+            f"[{simtime(self.start_time)}] [SIMULATOR] FINISH SIMULATION AT TIMESTAMP {self.simulator_time} "
+            f"({sec_to_time(self.simulator_time - self.genesis_time)} since genesis)"
+        )
 
-    def __collect_events_upto_current_time_and_prio(self, progress_time=False) -> Iterable[Event]:
+    def __collect_events_upto_current_time_and_prio(
+        self, progress_time=False
+    ) -> Iterable[Event]:
         element: Optional[Event] = queue_element_or_none(self.events)
         while element is not None:
-            if element.time == self.simulator_time and element.priority == self.simulator_prio:
+            if (
+                element.time == self.simulator_time
+                and element.priority == self.simulator_prio
+            ):
                 yield element
-            elif element.time == self.simulator_time and element.priority < self.simulator_prio:
+            elif (
+                element.time == self.simulator_time
+                and element.priority < self.simulator_prio
+            ):
                 # This is expected to happen when Balancing Attacking clients take part in the simulation
                 # If it happens otherwise, it is probably a bug and should be investigated
-                print(f"[WARNING] Priority downgrade ({self.simulator_prio} -> {element.priority})")
+                print(
+                    f"[WARNING] Priority downgrade ({self.simulator_prio} -> {element.priority})"
+                )
                 # print(f'Current: {element}')
                 # print(f'Previous: {self.element_cache}')
                 self.simulator_prio = element.priority
                 yield element
             elif element.time < self.simulator_time:
-                print(f'[WARNING] element.time is before simulator_time! {str(element)}')
+                print(
+                    f"[WARNING] element.time is before simulator_time! {str(element)}"
+                )
                 # This should not happen. Investigate if it does.
                 element.time = self.simulator_time
                 yield element
@@ -370,7 +451,9 @@ class SimulationBuilder(Builder):
     end_time: uint64
     statproducers: List[Tuple[int, int]]
     graphproducers: List[Tuple[int, int, bool]]
-    custom_latency_map: Optional[Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]] = None
+    custom_latency_map: Optional[
+        Union[Tuple[Tuple[int]], Dict[str, Tuple[Tuple[int]]]]
+    ] = None
     latency_modifier: Callable[[int], int]
 
     beacon_client_builders: List[BeaconClientBuilder]
@@ -389,7 +472,9 @@ class SimulationBuilder(Builder):
 
     def beacon_client(self, count):
         self.current_child_count = count
-        return BeaconClientBuilder(self.configpath, self.configname, parent_builder=self)
+        return BeaconClientBuilder(
+            self.configpath, self.configname, parent_builder=self
+        )
 
     def build_impl(self, counter):
         client_to_simulator_queue = Queue()
@@ -399,24 +484,33 @@ class SimulationBuilder(Builder):
         clients = list()
         for client_builder in self.beacon_client_builders:
             simulator_to_client_queue = JoinableQueue()
-            client_builder.neccessary_information(validator_counter, client_to_simulator_queue)
+            client_builder.neccessary_information(
+                validator_counter, client_to_simulator_queue
+            )
             client = client_builder.build(callback=False, counter=client_counter)
             indexed_client = IndexedBeaconClient(
-                queue=simulator_to_client_queue,
-                beacon_client=client
+                queue=simulator_to_client_queue, beacon_client=client
             )
-            indexed_client.beacon_client.simulator_to_client_queue = simulator_to_client_queue
+            indexed_client.beacon_client.simulator_to_client_queue = (
+                simulator_to_client_queue
+            )
             clients.append(indexed_client)
             client_counter += 1
             validator_counter += len(indexed_client.beacon_client.validators)
         simulator = Simulator(self.rand, self.custom_latency_map, self.latency_modifier)
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
-        simulator.events.put(SimulationEndEvent(simulator.genesis_time + self.end_time, 0))
+        simulator.events.put(
+            SimulationEndEvent(simulator.genesis_time + self.end_time, 0)
+        )
         for client, time in self.statproducers:
-            simulator.events.put(ProduceStatisticsEvent(simulator.genesis_time + time, 100, client))
+            simulator.events.put(
+                ProduceStatisticsEvent(simulator.genesis_time + time, 100, client)
+            )
         for client, time, show in self.graphproducers:
-            simulator.events.put(ProduceGraphEvent(simulator.genesis_time + time, 100, client, show))
+            simulator.events.put(
+                ProduceGraphEvent(simulator.genesis_time + time, 100, client, show)
+            )
         return simulator
 
     def set_end_time(self, end_time):

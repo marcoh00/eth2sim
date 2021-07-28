@@ -1,5 +1,12 @@
-from attackingbeaconclient import TimeAttackedBeaconClient, BalancingAttackingBeaconClient
-from slashingbeaconclient import AttesterSlashingSameHeightClient, AttesterSlashingWithinSpan, BlockSlashingBeaconClient
+from attackingbeaconclient import (
+    TimeAttackedBeaconClient,
+    BalancingAttackingBeaconClient,
+)
+from slashingbeaconclient import (
+    AttesterSlashingSameHeightClient,
+    AttesterSlashingWithinSpan,
+    BlockSlashingBeaconClient,
+)
 from beaconclient import BeaconClient
 from multiprocessing import JoinableQueue, Queue
 from typing import Dict, List, Optional
@@ -26,7 +33,12 @@ class BeaconClientBuilder(Builder):
 
     attackinfo: Dict
 
-    def __init__(self, configpath, configname, parent_builder=None,):
+    def __init__(
+        self,
+        configpath,
+        configname,
+        parent_builder=None,
+    ):
         super(BeaconClientBuilder, self).__init__(parent_builder)
         self.validator_builders = []
         self.configpath = configpath
@@ -34,7 +46,7 @@ class BeaconClientBuilder(Builder):
         self.debug = False
         self.debugfile = None
         self.profile = False
-        self.mode = 'HONEST'
+        self.mode = "HONEST"
         self.neccessary_info_set = False
         self.validator_start_at = 0
         self.simulator_to_client_queue = JoinableQueue()
@@ -43,11 +55,18 @@ class BeaconClientBuilder(Builder):
 
     def build_impl(self, counter):
         if not self.neccessary_info_set:
-            raise ValueError('Need to specify queues and validator start index')
-        if self.mode not in ('HONEST', 'BlockSlashing', 'AttesterSlashingSameHeight', 'AttesterSlashingWithinSpan', 'TimeAttacked', 'BalancingAttacking'):
-            raise ValueError(f'Unknown mode: {self.mode}')
+            raise ValueError("Need to specify queues and validator start index")
+        if self.mode not in (
+            "HONEST",
+            "BlockSlashing",
+            "AttesterSlashingSameHeight",
+            "AttesterSlashingWithinSpan",
+            "TimeAttacked",
+            "BalancingAttacking",
+        ):
+            raise ValueError(f"Unknown mode: {self.mode}")
 
-        if self.mode == 'HONEST':
+        if self.mode == "HONEST":
             return BeaconClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -57,10 +76,10 @@ class BeaconClientBuilder(Builder):
                 validator_builders=self.validator_builders,
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
-                profile=self.profile
+                profile=self.profile,
             )
-        elif self.mode == 'BlockSlashing':
-            print('CONSTRUCT BLOCK SLASHER')
+        elif self.mode == "BlockSlashing":
+            print("CONSTRUCT BLOCK SLASHER")
             return BlockSlashingBeaconClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -70,10 +89,10 @@ class BeaconClientBuilder(Builder):
                 validator_builders=self.validator_builders,
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
-                profile=self.profile
+                profile=self.profile,
             )
-        elif self.mode == 'AttesterSlashingSameHeight':
-            print('CONSTRUCT ATTESTER SLASHER W/ TOO LOW ATTESTATIONS')
+        elif self.mode == "AttesterSlashingSameHeight":
+            print("CONSTRUCT ATTESTER SLASHER W/ TOO LOW ATTESTATIONS")
             return AttesterSlashingSameHeightClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -83,10 +102,10 @@ class BeaconClientBuilder(Builder):
                 validator_builders=self.validator_builders,
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
-                profile=self.profile
+                profile=self.profile,
             )
-        elif self.mode == 'AttesterSlashingWithinSpan':
-            print('CONSTRUCT ATTESTER SLASHER W/ ATTESTATIONS WITHIN SPAN')
+        elif self.mode == "AttesterSlashingWithinSpan":
+            print("CONSTRUCT ATTESTER SLASHER W/ ATTESTATIONS WITHIN SPAN")
             return AttesterSlashingWithinSpan(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -96,11 +115,11 @@ class BeaconClientBuilder(Builder):
                 validator_builders=self.validator_builders,
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
-                profile=self.profile
+                profile=self.profile,
             )
-        elif self.mode == 'TimeAttacked':
-            print('CONSTRUCT TIME ATTACKED')
-            assert len(self.attackinfo.keys()) == 3 
+        elif self.mode == "TimeAttacked":
+            print("CONSTRUCT TIME ATTACKED")
+            assert len(self.attackinfo.keys()) == 3
             return TimeAttackedBeaconClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -111,10 +130,10 @@ class BeaconClientBuilder(Builder):
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
                 profile=self.profile,
-                **self.attackinfo
+                **self.attackinfo,
             )
-        elif self.mode == 'BalancingAttacking':
-            print('CONSTRUCT BALANCING ATTACKING')
+        elif self.mode == "BalancingAttacking":
+            print("CONSTRUCT BALANCING ATTACKING")
             return BalancingAttackingBeaconClient(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
@@ -125,7 +144,7 @@ class BeaconClientBuilder(Builder):
                 validator_first_counter=self.validator_start_at,
                 debug=self.debug,
                 profile=self.profile,
-                **self.attackinfo
+                **self.attackinfo,
             )
 
     def register(self, child_builder: ValidatorBuilder):
@@ -143,7 +162,7 @@ class BeaconClientBuilder(Builder):
     def set_mode(self, mode):
         self.mode = mode
         return self
-    
+
     def set_attackinfo(self, attackinfo):
         self.attackinfo = attackinfo
         return self

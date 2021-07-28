@@ -38,11 +38,16 @@ class Validator:
 
     def index_from_state(self, state: spec.BeaconState):
         # Check whether counter matches
-        if len(state.validators) >= self.counter and state.validators[self.counter].pubkey == self.pubkey:
+        if (
+            len(state.validators) >= self.counter
+            and state.validators[self.counter].pubkey == self.pubkey
+        ):
             self.index = spec.ValidatorIndex(self.counter)
         else:
             self.index = self.__find_index(state)
-            print(f"WARNING: Validator counter is not the same as ValidatorIndex. counter=[{self.counter}] index=[{self.index}]")
+            print(
+                f"WARNING: Validator counter is not the same as ValidatorIndex. counter=[{self.counter}] index=[{self.index}]"
+            )
 
     def __find_index(self, state: spec.BeaconState) -> Optional[spec.ValidatorIndex]:
         for index, validator in enumerate(state.validators):
@@ -61,15 +66,15 @@ class Validator:
             keys = Path(keydir)
 
         if keys is not None and keys.is_dir():
-            pubkey_file = (keys / f'{counter}.pubkey')
-            privkey_file = (keys / f'{counter}.privkey')
+            pubkey_file = keys / f"{counter}.pubkey"
+            privkey_file = keys / f"{counter}.privkey"
             if pubkey_file.is_file() and privkey_file.is_file():
                 if counter % 200 == 0:
-                    print(f'[VALIDATOR# {counter}] Read keys from file')
+                    print(f"[VALIDATOR# {counter}] Read keys from file")
                 pubkey = pubkey_file.read_bytes()
                 privkey = int(privkey_file.read_text())
         if privkey is None or pubkey is None:
-            print(f'[VALIDATOR# {counter}] Generate and save keys')
+            print(f"[VALIDATOR# {counter}] Generate and save keys")
             privkey = random.randint(1, curve_order)
             pubkey = Bls.SkToPk(privkey)
             if keys is not None:
@@ -90,9 +95,7 @@ class ValidatorBuilder(Builder):
 
     def build_impl(self, counter):
         return Validator(
-            counter=counter,
-            startbalance=self.startbalance,
-            keydir=self.keydir
+            counter=counter, startbalance=self.startbalance, keydir=self.keydir
         )
 
     def register(self, child_builder):

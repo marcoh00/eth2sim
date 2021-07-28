@@ -27,6 +27,7 @@ def calc_simtime(slot, epoch=None, seconds=None):
     return int(time)
 
 def simulation0(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -38,6 +39,7 @@ def simulation0(config, blockhash):
         .build()
 
 def simulation1(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -54,6 +56,7 @@ def simulation1(config, blockhash):
         .build()
 
 def simulation2(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -65,6 +68,7 @@ def simulation2(config, blockhash):
         .build()
 
 def simulation3(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -76,6 +80,7 @@ def simulation3(config, blockhash):
         .build()
 
 def simulation4(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -92,6 +97,7 @@ def simulation4(config, blockhash):
         .build()
 
 def simulation5(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -103,6 +109,7 @@ def simulation5(config, blockhash):
         .build()
 
 def simulation6(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .beacon_client(4)\
@@ -113,6 +120,7 @@ def simulation6(config, blockhash):
         .build()
 
 def simulation7(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .beacon_client(8)\
@@ -123,6 +131,7 @@ def simulation7(config, blockhash):
         .build()
 
 def simulation8(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .beacon_client(3)\
@@ -138,6 +147,7 @@ def simulation8(config, blockhash):
         .build()
 
 def simulation9(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .beacon_client(7)\
@@ -153,6 +163,7 @@ def simulation9(config, blockhash):
         .build()
 
 def simulation10(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 4)\
@@ -164,6 +175,7 @@ def simulation10(config, blockhash):
         .build()
 
 def simulation11(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 8)\
@@ -175,6 +187,7 @@ def simulation11(config, blockhash):
         .build()
 
 def simulation12(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=8))\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -192,6 +205,7 @@ def simulation12(config, blockhash):
     .build()
 
 def simulation13(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=8))\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
@@ -214,6 +228,7 @@ def simulation13(config, blockhash):
     .build()
 
 def simulation14(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .beacon_client(8)\
@@ -224,6 +239,7 @@ def simulation14(config, blockhash):
         .build()
 
 def simulation15(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=13))\
         .beacon_client(1)\
@@ -248,6 +264,7 @@ def simulation15(config, blockhash):
         .build()
 
 def simulation16(config, blockhash):
+    # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=4))\
         .set_custom_latency_map(((0, 0),))\

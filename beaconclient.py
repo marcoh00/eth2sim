@@ -22,8 +22,18 @@ import eth2spec.phase0.spec as spec
 from cache import AttestationCache, BlockCache
 from colors import COLORS
 from eth2spec.config import config_util
-from events import NextSlotEvent, BeaconClientInfo, LatestVoteOpportunity, AggregateOpportunity, MessageEvent, Event, SimulationEndEvent, \
-    ProduceStatisticsEvent, ProduceGraphEvent, ValidatorInitializationEvent
+from events import (
+    NextSlotEvent,
+    BeaconClientInfo,
+    LatestVoteOpportunity,
+    AggregateOpportunity,
+    MessageEvent,
+    Event,
+    SimulationEndEvent,
+    ProduceStatisticsEvent,
+    ProduceGraphEvent,
+    ValidatorInitializationEvent,
+)
 from helpers import queue_element_or_none
 from validator import Validator, ValidatorBuilder
 
@@ -39,7 +49,9 @@ class BeaconClient(Process):
     validators: List[Validator]
 
     #                                                          Which, How many'th, total committee size
-    committee: Dict[spec.Slot, Dict[spec.ValidatorIndex, Tuple[spec.CommitteeIndex, int, int]]]
+    committee: Dict[
+        spec.Slot, Dict[spec.ValidatorIndex, Tuple[spec.CommitteeIndex, int, int]]
+    ]
     committee_count: Dict[spec.Epoch, int]
 
     current_slot: spec.Slot
@@ -55,16 +67,18 @@ class BeaconClient(Process):
     should_quit: bool
     head_state: Optional[spec.BeaconState]
 
-    def __init__(self,
-                 counter: int,
-                 simulator_to_client_queue: JoinableQueue,
-                 client_to_simulator_queue: Queue,
-                 configpath: str,
-                 configname: str,
-                 validator_builders: Sequence[ValidatorBuilder],
-                 validator_first_counter: int,
-                 debug=False,
-                 profile=False):
+    def __init__(
+        self,
+        counter: int,
+        simulator_to_client_queue: JoinableQueue,
+        client_to_simulator_queue: Queue,
+        configpath: str,
+        configname: str,
+        validator_builders: Sequence[ValidatorBuilder],
+        validator_first_counter: int,
+        debug=False,
+        profile=False,
+    ):
         super().__init__()
         self.counter = counter
         self.simulator_to_client_queue = simulator_to_client_queue
@@ -85,7 +99,7 @@ class BeaconClient(Process):
         self.debug = debug
         self.debugfile = None
         self.profile = profile
-        self.slashings = {'proposer': [], 'attester': []}
+        self.slashings = {"proposer": [], "attester": []}
         self.starttime = int(time.time())
         self.proposer_current_slot = None
         self.build_validators()
@@ -97,7 +111,7 @@ class BeaconClient(Process):
         if not self.debug:
             return
         if not self.debugfile:
-            self.debugfile = open(f'log_{self.counter}_{int(time.time())}.json', 'w')
+            self.debugfile = open(f"log_{self.counter}_{int(time.time())}.json", "w")
         if isinstance(obj, Container):
             logobj = str(obj)
         elif isinstance(obj, dict):
@@ -109,17 +123,23 @@ class BeaconClient(Process):
         else:
             logobj = str(obj)
         json.dump(
-            {'level': typ,
-             'index': self.counter,
-             'timestamp': self.current_time,
-             'slot': self.current_slot,
-             'message': logobj}, self.debugfile)
-        self.debugfile.write('\n')
-        if 'Error' in typ:
+            {
+                "level": typ,
+                "index": self.counter,
+                "timestamp": self.current_time,
+                "slot": self.current_slot,
+                "message": logobj,
+            },
+            self.debugfile,
+        )
+        self.debugfile.write("\n")
+        if "Error" in typ:
             self.debugfile.flush()
 
     def run(self):
-        print(f"[BEACON CLIENT {self.counter}] Beacon Client started. Process PID is {os.getpid()}.")
+        print(
+            f"[BEACON CLIENT {self.counter}] Beacon Client started. Process PID is {os.getpid()}."
+        )
         config_util.prepare_config(self.specconf[0], self.specconf[1])
         # noinspection PyTypeChecker
         reload(spec)
@@ -141,8 +161,10 @@ class BeaconClient(Process):
     def __handle_event(self, event: Event):
         if event.time < self.current_time:
             self.client_to_simulator_queue.put(
-                SimulationEndEvent(time=self.current_time,
-                                   message=f"Own time {self.current_time} is later than event time {event.time}. {event}/{self.event_cache}")
+                SimulationEndEvent(
+                    time=self.current_time,
+                    message=f"Own time {self.current_time} is later than event time {event.time}. {event}/{self.event_cache}",
+                )
             )
         if event.time > self.current_time and self.debug and self.debugfile:
             self.debugfile.flush()
@@ -157,40 +179,43 @@ class BeaconClient(Process):
             NextSlotEvent: self.handle_next_slot_event,
             ProduceStatisticsEvent: self.handle_statistics_event,
             ProduceGraphEvent: self.produce_graph_event,
-            BeaconClientInfo: self.handle_beacon_client_info
+            BeaconClientInfo: self.handle_beacon_client_info,
         }
         # noinspection PyArgumentList,PyTypeChecker
         self.pre_event_handling(event)
         actions[type(event)](event)
-    
+
     def handle_beacon_client_info(self, event: BeaconClientInfo):
         pass
-    
+
     def pre_event_handling(self, event: Event):
         pass
 
     def __handle_message_event(self, event: MessageEvent):
         decoder = {
-            'Attestation': spec.Attestation,
-            'SignedAggregateAndProof': spec.SignedAggregateAndProof,
-            'SignedBeaconBlock': spec.SignedBeaconBlock,
-            'BeaconBlock': spec.BeaconBlock,
-            'BeaconState': spec.BeaconState
+            "Attestation": spec.Attestation,
+            "SignedAggregateAndProof": spec.SignedAggregateAndProof,
+            "SignedBeaconBlock": spec.SignedBeaconBlock,
+            "BeaconBlock": spec.BeaconBlock,
+            "BeaconState": spec.BeaconState,
         }
         actions = {
-            'Attestation': self.handle_attestation,
-            'SignedAggregateAndProof': self.handle_aggregate,
-            'SignedBeaconBlock': self.handle_block,
-            'BeaconBlock': self.handle_genesis_block,
-            'BeaconState': self.handle_genesis_state
+            "Attestation": self.handle_attestation,
+            "SignedAggregateAndProof": self.handle_aggregate,
+            "SignedBeaconBlock": self.handle_block,
+            "BeaconBlock": self.handle_genesis_block,
+            "BeaconState": self.handle_genesis_state,
         }
-        self.log({
-            'time': event.time,
-            'prio': event.priority,
-            'type': event.message_type,
-            'marker': event.marker,
-            'delayed': event.delayed
-        }, 'MessageRecv')
+        self.log(
+            {
+                "time": event.time,
+                "prio": event.priority,
+                "type": event.message_type,
+                "marker": event.marker,
+                "delayed": event.delayed,
+            },
+            "MessageRecv",
+        )
         payload = decoder[event.message_type].decode_bytes(event.message)
         # noinspection PyArgumentList
         actions[event.message_type](payload, event.marker)
@@ -203,39 +228,43 @@ class BeaconClient(Process):
         asdict = dataclasses.asdict(stats)
         if event.print_event:
             pprint.pp(asdict)
-        self.log(str(stats), 'Statistics')
-        filename = f'stats_{self.counter}_{self.starttime}.json'
-        if not pathlib.Path(f'stats_{self.counter}_{self.starttime}.json').is_file():
-            with open(filename, 'w', encoding='utf-8') as fp:
-                fp.write('[')
-        with open(f'stats_{self.counter}_{self.starttime}.json', 'a') as fp:
-            fp.write(',\n')
+        self.log(str(stats), "Statistics")
+        filename = f"stats_{self.counter}_{self.starttime}.json"
+        if not pathlib.Path(f"stats_{self.counter}_{self.starttime}.json").is_file():
+            with open(filename, "w", encoding="utf-8") as fp:
+                fp.write("[")
+        with open(f"stats_{self.counter}_{self.starttime}.json", "a") as fp:
+            fp.write(",\n")
             json.dump(asdict, fp, indent=2)
 
     def produce_graph_event(self, event: ProduceGraphEvent):
         self.graph(event.show)
 
     def handle_genesis_state(self, state: spec.BeaconState, marker=None):
-        print(f'[BEACON CLIENT {self.counter}] Initialize state from Genesis State')
+        print(f"[BEACON CLIENT {self.counter}] Initialize state from Genesis State")
         self.state = state
         for validator in self.validators:
             validator.index_from_state(state)
 
     def handle_genesis_block(self, block: spec.BeaconBlock, marker=None):
-        print(f'[BEACON CLIENT {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block')
+        print(
+            f"[BEACON CLIENT {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block"
+        )
         self.store = spec.get_forkchoice_store(self.state, block)
         self.block_cache = BlockCache(block)
         self.head_root = spec.hash_tree_root(block)
-        print(f'[BEACON CLIENT {self.counter}] Initialize committee cache for first epoch')
+        print(
+            f"[BEACON CLIENT {self.counter}] Initialize committee cache for first epoch"
+        )
         self.update_committee(spec.Epoch(0), genesis=True)
 
     def __handle_simulation_end(self, event: SimulationEndEvent):
-        self.log(event, 'SimulationEnd')
-        statsfile = f'stats_{self.counter}_{self.starttime}.json'
+        self.log(event, "SimulationEnd")
+        statsfile = f"stats_{self.counter}_{self.starttime}.json"
         if self.debug and pathlib.Path(statsfile).is_file():
-            with open(statsfile, 'a', encoding='utf-8') as fp:
-                fp.write(']')
-        print(f'[BEACON CLIENT {self.counter}] Received SimulationEndEvent')
+            with open(statsfile, "a", encoding="utf-8") as fp:
+                fp.write("]")
+        print(f"[BEACON CLIENT {self.counter}] Received SimulationEndEvent")
         time.sleep(3)
         # Mark all remaining tasks as done
         next_task = queue_element_or_none(self.simulator_to_client_queue)
@@ -245,7 +274,7 @@ class BeaconClient(Process):
         self.should_quit = True
         if self.debug:
             self.graph(show=False)
-    
+
     def update_committee(self, epoch: spec.Epoch, genesis=False):
         committee_count_per_slot, new_committee = self.get_committee(epoch, genesis)
         self.committee_count[epoch] = committee_count_per_slot
@@ -256,25 +285,49 @@ class BeaconClient(Process):
         new_committee = dict()
         local_state = self.state if genesis else self.head_state
         local_state = head_state if head_state is not None else local_state
-        self.log(f"head_state.slot=[{local_state.slot}] based on block in slot {local_state.latest_block_header.slot}", "CommitteeDecisionBase")
+        self.log(
+            f"head_state.slot=[{local_state.slot}] based on block in slot {local_state.latest_block_header.slot}",
+            "CommitteeDecisionBase",
+        )
         if epoch > spec.compute_epoch_at_slot(local_state.slot) + 1:
             assert False
         start_slot = spec.compute_start_slot_at_epoch(epoch)
         committee_count_per_slot = spec.get_committee_count_per_slot(local_state, epoch)
-        for slot in (spec.Slot(s) for s in range(start_slot, start_slot + spec.SLOTS_PER_EPOCH)):
+        for slot in (
+            spec.Slot(s) for s in range(start_slot, start_slot + spec.SLOTS_PER_EPOCH)
+        ):
             new_committee[slot] = dict()
-            for committee_index in (spec.CommitteeIndex(c) for c in range(committee_count_per_slot)):
-                committee = spec.get_beacon_committee(local_state, spec.Slot(slot), spec.CommitteeIndex(committee_index))
+            for committee_index in (
+                spec.CommitteeIndex(c) for c in range(committee_count_per_slot)
+            ):
+                committee = spec.get_beacon_committee(
+                    local_state, spec.Slot(slot), spec.CommitteeIndex(committee_index)
+                )
                 for validator_index in enumerate(committee):
-                    new_committee[slot][validator_index[1]] = (committee_index, validator_index[0], len(committee))
-            self.log({'slot': int(slot), 'committee': str(new_committee[slot])}, 'CommitteeUpdate')
+                    new_committee[slot][validator_index[1]] = (
+                        committee_index,
+                        validator_index[0],
+                        len(committee),
+                    )
+            self.log(
+                {"slot": int(slot), "committee": str(new_committee[slot])},
+                "CommitteeUpdate",
+            )
         return committee_count_per_slot, new_committee
 
-    def propose_block(self, validator: Validator, head_state: spec.BeaconState, slashme=False):
-        print(f"[BEACON CLIENT {self.counter}] Create block for Validator {self.proposer_current_slot}")
-        min_slot_to_include = spec.compute_start_slot_at_epoch(
-            spec.compute_epoch_at_slot(self.current_slot)
-        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
+    def propose_block(
+        self, validator: Validator, head_state: spec.BeaconState, slashme=False
+    ):
+        print(
+            f"[BEACON CLIENT {self.counter}] Create block for Validator {self.proposer_current_slot}"
+        )
+        min_slot_to_include = (
+            spec.compute_start_slot_at_epoch(
+                spec.compute_epoch_at_slot(self.current_slot)
+            )
+            if self.current_slot > spec.SLOTS_PER_EPOCH
+            else spec.Slot(0)
+        )
         max_slot_to_include = self.current_slot - 1
 
         # If the attestation's target epoch is the current epoch,
@@ -285,8 +338,7 @@ class BeaconClient(Process):
         candidate_attestations = tuple(
             attestation
             for attestation in self.attestation_cache.attestations_not_seen_in_block(
-                min_slot_to_include,
-                max_slot_to_include
+                min_slot_to_include, max_slot_to_include
             )
             if attestation.data.target.epoch != spec.get_current_epoch(head_state)
             or head_state.current_justified_checkpoint == attestation.data.source
@@ -295,7 +347,7 @@ class BeaconClient(Process):
             slot=head_state.slot,
             proposer_index=validator.index,
             parent_root=self.head_root,
-            state_root=spec.Bytes32(bytes(0 for _ in range(0, 32)))
+            state_root=spec.Bytes32(bytes(0 for _ in range(0, 32))),
         )
         randao_reveal = spec.get_epoch_signature(head_state, block, validator.privkey)
 
@@ -304,32 +356,44 @@ class BeaconClient(Process):
         eth1_data = head_state.eth1_data
 
         # Include slashable blocks and attestations if the corresponding validators are deemed slashable
-        proposer_slashings: List[spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS] = list(
-            slashing for slashing in self.block_cache.search_slashings(head_state)
+        proposer_slashings: List[
+            spec.ProposerSlashing, spec.MAX_PROPOSER_SLASHINGS
+        ] = list(
+            slashing
+            for slashing in self.block_cache.search_slashings(head_state)
             if spec.is_slashable_validator(
                 head_state.validators[slashing.signed_header_1.message.proposer_index],
-                spec.get_current_epoch(head_state)
+                spec.get_current_epoch(head_state),
             )
         )
-        attester_slashings: List[spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS] = list(
-            slashing for slashing in self.attestation_cache.search_slashings(head_state)
+        attester_slashings: List[
+            spec.AttesterSlashing, spec.MAX_ATTESTER_SLASHINGS
+        ] = list(
+            slashing
+            for slashing in self.attestation_cache.search_slashings(head_state)
             if any(
-                spec.is_slashable_validator(head_state.validators[vindex], spec.get_current_epoch(head_state))
-                for vindex in set(slashing.attestation_1.attesting_indices)
-                    .intersection(set(slashing.attestation_2.attesting_indices)))
+                spec.is_slashable_validator(
+                    head_state.validators[vindex], spec.get_current_epoch(head_state)
+                )
+                for vindex in set(
+                    slashing.attestation_1.attesting_indices
+                ).intersection(set(slashing.attestation_2.attesting_indices))
+            )
         )
 
         # Truncate the lists if they contain more elements than allowed by spec
         if len(proposer_slashings) > spec.MAX_PROPOSER_SLASHINGS:
-            proposer_slashings = proposer_slashings[0:spec.MAX_PROPOSER_SLASHINGS]
+            proposer_slashings = proposer_slashings[0 : spec.MAX_PROPOSER_SLASHINGS]
         if len(attester_slashings) > spec.MAX_ATTESTER_SLASHINGS:
-            attester_slashings = attester_slashings[0:spec.MAX_ATTESTER_SLASHINGS]
+            attester_slashings = attester_slashings[0 : spec.MAX_ATTESTER_SLASHINGS]
         if len(candidate_attestations) > spec.MAX_ATTESTATIONS:
-            candidate_attestations = candidate_attestations[0:spec.MAX_ATTESTATIONS]
+            candidate_attestations = candidate_attestations[0 : spec.MAX_ATTESTATIONS]
 
         # Provoke slashing by forming an alternative block which doesn't contain the last 2 attestations
         if slashme:
-            candidate_attestations = candidate_attestations[0:len(candidate_attestations) - 2]
+            candidate_attestations = candidate_attestations[
+                0 : len(candidate_attestations) - 2
+            ]
 
         # We do not support deposits and voluntary exists
         deposits: List[spec.Deposit, spec.MAX_DEPOSITS] = list()
@@ -343,24 +407,37 @@ class BeaconClient(Process):
             attester_slashings=attester_slashings,
             attestations=candidate_attestations,
             deposits=deposits,
-            voluntary_exits=voluntary_exits
+            voluntary_exits=voluntary_exits,
         )
         block.body = body
         try:
             new_state_root = spec.compute_new_state_root(self.state, block)
         except AssertionError:
-            validator_status = [str(validator) for validator in self.state.validators if validator.slashed]
+            validator_status = [
+                str(validator)
+                for validator in self.state.validators
+                if validator.slashed
+            ]
             _, _, tb = sys.exc_info()
             traceback.print_tb(tb)
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
-            self.log({'text': text, 'block': str(block), 'validators': str(validator_status)}, 'FindNewStateRootError')
-            self.client_to_simulator_queue.put(SimulationEndEvent(time=self.current_time, priority=0, message=text))
+            self.log(
+                {
+                    "text": text,
+                    "block": str(block),
+                    "validators": str(validator_status),
+                },
+                "FindNewStateRootError",
+            )
+            self.client_to_simulator_queue.put(
+                SimulationEndEvent(time=self.current_time, priority=0, message=text)
+            )
             return
         block.state_root = new_state_root
         signed_block = spec.SignedBeaconBlock(
             message=block,
-            signature=spec.get_block_signature(self.state, block, validator.privkey)
+            signature=spec.get_block_signature(self.state, block, validator.privkey),
         )
         encoded_signed_block = signed_block.encode_bytes()
 
@@ -368,15 +445,15 @@ class BeaconClient(Process):
             time=self.current_time,
             priority=20,
             message=encoded_signed_block,
-            message_type='SignedBeaconBlock',
+            message_type="SignedBeaconBlock",
             fromidx=self.counter,
-            toidx=None
+            toidx=None,
         )
         self.client_to_simulator_queue.put(message)
         if self.debug:
             self.graph(show=False)
-        self.log(message.marker, 'BlockMessageSent')
-        self.log(signed_block, 'ProposeBlock')
+        self.log(message.marker, "BlockMessageSent")
+        self.log(signed_block, "ProposeBlock")
 
     def handle_next_slot_event(self, message: NextSlotEvent):
         self.current_slot = spec.Slot(message.slot)
@@ -392,46 +469,64 @@ class BeaconClient(Process):
         self.attestation_cache.add_queued_attestations(self.store)
 
         # Keep two epochs of past attestations
-        min_slot_to_keep = spec.compute_start_slot_at_epoch(
-            spec.compute_epoch_at_slot(self.current_slot) - 1
-        ) if self.current_slot > spec.SLOTS_PER_EPOCH else spec.Slot(0)
+        min_slot_to_keep = (
+            spec.compute_start_slot_at_epoch(
+                spec.compute_epoch_at_slot(self.current_slot) - 1
+            )
+            if self.current_slot > spec.SLOTS_PER_EPOCH
+            else spec.Slot(0)
+        )
         self.attestation_cache.cleanup_time_cache(min_slot_to_keep)
 
         # Handle up to last slot's attestations
         for attestation in self.attestation_cache.attestations_not_known_to_forkchoice(
-                spec.Slot(0),
-                max(self.current_slot - 1, 0)):
+            spec.Slot(0), max(self.current_slot - 1, 0)
+        ):
             try:
                 if attestation.data.beacon_block_root in self.store.blocks:
                     indexed = spec.get_indexed_attestation(self.head_state, attestation)
-                    self.log({
-                        'validator_estimation': indexed.attesting_indices,
-                        'slot': attestation.data.slot,
-                        'root': attestation.data.beacon_block_root
-                    }, 'AttestationProcessing')
+                    self.log(
+                        {
+                            "validator_estimation": indexed.attesting_indices,
+                            "slot": attestation.data.slot,
+                            "root": attestation.data.beacon_block_root,
+                        },
+                        "AttestationProcessing",
+                    )
                     spec.on_attestation(self.store, attestation)
-                    self.attestation_cache.accept_attestation(attestation, forkchoice=True)
+                    self.attestation_cache.accept_attestation(
+                        attestation, forkchoice=True
+                    )
             except AssertionError:
                 _, _, tb = sys.exc_info()
                 traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
-                print(f'[BEACON CLIENT {self.counter}] Could not validate attestation')
-                self.log({'line': line, 'text': text, 'attestation': str(attestation)}, 'ValidateAttestationOnSlotBoundaryError')
-        
+                print(f"[BEACON CLIENT {self.counter}] Could not validate attestation")
+                self.log(
+                    {"line": line, "text": text, "attestation": str(attestation)},
+                    "ValidateAttestationOnSlotBoundaryError",
+                )
+
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:
             spec.process_slots(head_state, self.current_slot)
         self.proposer_current_slot = spec.get_beacon_proposer_index(head_state)
-        
-        if self.proposer_current_slot in self.indexed_validators and not self.slashed(self.proposer_current_slot):
+
+        if self.proposer_current_slot in self.indexed_validators and not self.slashed(
+            self.proposer_current_slot
+        ):
             # Propose block if needed
-            self.propose_block(self.indexed_validators[self.proposer_current_slot], head_state)
+            self.propose_block(
+                self.indexed_validators[self.proposer_current_slot], head_state
+            )
         self.handle_statistics_event(
-            ProduceStatisticsEvent(time=self.current_time, priority=0, toidx=None, print_event=False)
+            ProduceStatisticsEvent(
+                time=self.current_time, priority=0, toidx=None, print_event=False
+            )
         )
         self.post_next_slot_event(head_state, self.indexed_validators)
-    
+
     def pre_next_slot_event(self, message: NextSlotEvent):
         pass
 
@@ -458,27 +553,35 @@ class BeaconClient(Process):
         attestations_to_aggregate = dict()
 
         # Attestations are aggregated per committee
-        for committee in (spec.CommitteeIndex(c) for c in range(self.committee_count[current_epoch])):
+        for committee in (
+            spec.CommitteeIndex(c) for c in range(self.committee_count[current_epoch])
+        ):
             # Aggregate all known unaggregated attestations which represent
             # the same vote this beacon client and its validators attested for
             attestations_to_aggregate[committee] = [
                 attestationcache.attestation
-                for attestationcache
-                in self.attestation_cache.cache_by_time.get(slot, dict()).get(committee, list())
-                if committee in self.last_attestation_data and attestationcache.attestation.data == self.last_attestation_data[committee]
+                for attestationcache in self.attestation_cache.cache_by_time.get(
+                    slot, dict()
+                ).get(committee, list())
+                if committee in self.last_attestation_data
+                and attestationcache.attestation.data
+                == self.last_attestation_data[committee]
                 and len(attestationcache.attesting_indices) == 1
             ]
         for (validator_index, validator) in attesting_validators.items():
             # For each validator, check if it is supposed to aggregate
             validator_committee = self.committee[self.current_slot][validator_index][0]
-            slot_signature = spec.get_slot_signature(self.state, spec.Slot(message.slot), validator.privkey)
-            if not spec.is_aggregator(self.state,
-                                      spec.Slot(message.slot),
-                                      validator_committee,
-                                      slot_signature):
+            slot_signature = spec.get_slot_signature(
+                self.state, spec.Slot(message.slot), validator.privkey
+            )
+            if not spec.is_aggregator(
+                self.state, spec.Slot(message.slot), validator_committee, slot_signature
+            ):
                 continue
 
-            aggregation_bits = list(0 for _ in range(self.committee[self.current_slot][validator_index][2]))
+            aggregation_bits = list(
+                0 for _ in range(self.committee[self.current_slot][validator_index][2])
+            )
 
             # Set all bits representing the validators inside the aggregated attestation
             for attestation in attestations_to_aggregate[validator_committee]:
@@ -486,12 +589,16 @@ class BeaconClient(Process):
                     if bit:
                         aggregation_bits[idx] = 1
             # noinspection PyArgumentList
-            aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits)
+            aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](
+                *aggregation_bits
+            )
 
             attestation = spec.Attestation(
                 aggregation_bits=aggregation_bits,
                 data=self.last_attestation_data[validator_committee],
-                signature=spec.get_aggregate_signature(attestations_to_aggregate[validator_committee])
+                signature=spec.get_aggregate_signature(
+                    attestations_to_aggregate[validator_committee]
+                ),
             )
             aggregate_and_proof = spec.get_aggregate_and_proof(
                 self.state, validator_index, attestation, validator.privkey
@@ -500,24 +607,30 @@ class BeaconClient(Process):
                 self.state, aggregate_and_proof, validator.privkey
             )
             signed_aggregate_and_proof = spec.SignedAggregateAndProof(
-                message=aggregate_and_proof,
-                signature=aggregate_and_proof_signature
+                message=aggregate_and_proof, signature=aggregate_and_proof_signature
             )
             encoded_aggregate_and_proof = signed_aggregate_and_proof.encode_bytes()
             send_message = MessageEvent(
                 time=self.current_time,
                 priority=30,
                 message=encoded_aggregate_and_proof,
-                message_type='SignedAggregateAndProof',
+                message_type="SignedAggregateAndProof",
                 fromidx=self.counter,
-                toidx=None
+                toidx=None,
             )
             self.client_to_simulator_queue.put(send_message)
-            self.log(send_message.marker, 'AggregateAndProofMessageSent')
-            self.log(signed_aggregate_and_proof, 'AggregateAndProofSend')
+            self.log(send_message.marker, "AggregateAndProofMessageSent")
+            self.log(signed_aggregate_and_proof, "AggregateAndProofSend")
 
     def handle_attestation(self, attestation: spec.Attestation, marker=None):
-        self.log({'attestation': attestation, 'marker': marker, 'hash': spec.hash_tree_root(attestation)}, 'AttestationRecv')
+        self.log(
+            {
+                "attestation": attestation,
+                "marker": marker,
+                "hash": spec.hash_tree_root(attestation),
+            },
+            "AttestationRecv",
+        )
         self.attestation_cache.add_attestation(attestation, self.store, marker=marker)
 
     def handle_aggregate(self, aggregate: spec.SignedAggregateAndProof, marker=None):
@@ -528,50 +641,62 @@ class BeaconClient(Process):
         # Try to process an old chain first
         old_chain = self.block_cache.longest_outstanding_chain(self.store)
         if len(old_chain) > 0:
-            self.log(len(old_chain), 'OrphanedBlocksToHandle')
+            self.log(len(old_chain), "OrphanedBlocksToHandle")
         for cblock in old_chain:
             self.__process_block_contents(cblock)
 
         # Process the new block now
-        self.log({
-            'root': spec.hash_tree_root(block.message),
-            'parent': block.message.parent_root,
-            'proposer': block.message.proposer_index
-        }, 'BlockRecv')
+        self.log(
+            {
+                "root": spec.hash_tree_root(block.message),
+                "parent": block.message.parent_root,
+                "proposer": block.message.proposer_index,
+            },
+            "BlockRecv",
+        )
         self.block_cache.add_block(block)
         try:
             chain = self.block_cache.chain_for_block(block, self.store)
         except KeyError as e:
-            print(f'[BEACON CLIENT {self.counter}] Could not validate block: {e} - parts of chain are missing')
+            print(
+                f"[BEACON CLIENT {self.counter}] Could not validate block: {e} - parts of chain are missing"
+            )
             chain = []
-        self.log(len(chain), 'BlocksToHandle')
+        self.log(len(chain), "BlocksToHandle")
         for cblock in chain:
             self.__process_block_contents(cblock, marker)
 
     def __process_block_contents(self, block: spec.SignedBeaconBlock, marker=None):
         try:
             if block.message.slot > self.current_slot:
-                self.log(f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])", 'FutureBlockWarning')
+                self.log(
+                    f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])",
+                    "FutureBlockWarning",
+                )
                 return
             spec.on_block(self.store, block)
             self.block_cache.accept_block(block)
 
             for aslashing in block.message.body.attester_slashings:
-                self.log(aslashing, 'AttesterSlashing')
-                self.slashings['attester'].append(str(aslashing))
+                self.log(aslashing, "AttesterSlashing")
+                self.slashings["attester"].append(str(aslashing))
             for pslashing in block.message.body.proposer_slashings:
-                self.log(pslashing, 'ProposerSlashing')
-                self.slashings['proposer'].append(str(pslashing))
+                self.log(pslashing, "ProposerSlashing")
+                self.slashings["proposer"].append(str(pslashing))
             for attestation in block.message.body.attestations:
-                self.attestation_cache.add_attestation(attestation, self.store, seen_in_block=True, marker=marker)
+                self.attestation_cache.add_attestation(
+                    attestation, self.store, seen_in_block=True, marker=marker
+                )
         except AssertionError:
-                _, _, tb = sys.exc_info()
-                traceback.print_tb(tb)
-                tb_info = traceback.extract_tb(tb)
-                filename, line, func, text = tb_info[-1]
-                print(f'[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text})! slot=[{block.message.slot}] proposer_index=[{block.message.proposer_index}] root=[{spec.hash_tree_root(block.message)}] parent_root=[{block.message.parent_root}]')
-                self.handle_invalid_block(block, str(text))
-    
+            _, _, tb = sys.exc_info()
+            traceback.print_tb(tb)
+            tb_info = traceback.extract_tb(tb)
+            filename, line, func, text = tb_info[-1]
+            print(
+                f"[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text})! slot=[{block.message.slot}] proposer_index=[{block.message.proposer_index}] root=[{spec.hash_tree_root(block.message)}] parent_root=[{block.message.parent_root}]"
+            )
+            self.handle_invalid_block(block, str(text))
+
     def handle_invalid_block(self, signed_block: spec.SignedBeaconBlock, reason: str):
         """
         When time attacked beacon clients are inside the simulation, the following happens:
@@ -583,9 +708,11 @@ class BeaconClient(Process):
             - When the attestations are ignored, the participant will never get slashed
         Because of that, we will calculate the post-state of _every_ block, even those, which are invalid because of mismatching checkpoints
         """
-        
-        if 'get_ancestor' in reason and 'finalized_checkpoint' in reason:
-            print(f"[BEACON CLIENT {self.counter}] Add the block to fork choice store, even though it is invalid because of mismatching checkpoints")
+
+        if "get_ancestor" in reason and "finalized_checkpoint" in reason:
+            print(
+                f"[BEACON CLIENT {self.counter}] Add the block to fork choice store, even though it is invalid because of mismatching checkpoints"
+            )
 
             """
             The following lines are directly taken from the eth2.0-spec code (`on_block`)
@@ -600,7 +727,9 @@ class BeaconClient(Process):
             assert spec.get_current_slot(self.store) >= block.slot
 
             # Check that block is later than the finalized epoch slot (optimization to reduce calls to get_ancestor)
-            finalized_slot = spec.compute_start_slot_at_epoch(self.store.finalized_checkpoint.epoch)
+            finalized_slot = spec.compute_start_slot_at_epoch(
+                self.store.finalized_checkpoint.epoch
+            )
             assert block.slot > finalized_slot
             # Check block is a descendant of the finalized block at the checkpoint finalized slot
             # assert get_ancestor(store, block.parent_root, finalized_slot) == store.finalized_checkpoint.root
@@ -619,14 +748,14 @@ class BeaconClient(Process):
 
     def handle_message_event(self, message: MessageEvent):
         actions = {
-            'Attestation': self.handle_attestation,
-            'SignedAggregateAndProof': self.handle_aggregate,
-            'SignedBeaconBlock': self.handle_block
+            "Attestation": self.handle_attestation,
+            "SignedAggregateAndProof": self.handle_aggregate,
+            "SignedBeaconBlock": self.handle_block,
         }
         decoder = {
-            'Attestation': spec.Attestation.decode_bytes,
-            'SignedAggregateAndProof': spec.SignedAggregateAndProof.decode_bytes,
-            'SignedBeaconBlock': spec.SignedBeaconBlock.decode_bytes
+            "Attestation": spec.Attestation.decode_bytes,
+            "SignedAggregateAndProof": spec.SignedAggregateAndProof.decode_bytes,
+            "SignedBeaconBlock": spec.SignedBeaconBlock.decode_bytes,
         }
         # noinspection PyArgumentList
         payload = decoder[message.message_type](message.message)
@@ -638,15 +767,18 @@ class BeaconClient(Process):
         self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
         self.pre_attest()
         current_epoch = spec.compute_epoch_at_slot(self.current_slot)
-        if self.current_slot not in self.committee or current_epoch not in self.committee_count:
+        if (
+            self.current_slot not in self.committee
+            or current_epoch not in self.committee_count
+        ):
             self.update_committee(spec.compute_epoch_at_slot(self.current_slot))
         attesting_validators = self.__attesting_validators_at_current_slot()
-        self.log(attesting_validators, 'AttestingValidators')
+        self.log(attesting_validators, "AttestingValidators")
         if self.debug:
             self.graph(show=False, balance=True)
         if len(attesting_validators) < 1:
             return
-        
+
         head_block = self.store.blocks[self.head_root]
         head_state = self.head_state.copy()
         if head_state.slot < self.current_slot:
@@ -658,10 +790,14 @@ class BeaconClient(Process):
             assert False
 
         # As specified inside validator.md spec / Attesting / Note:
-        start_slot = spec.compute_start_slot_at_epoch(spec.get_current_epoch(head_state))
-        epoch_boundary_block_root = spec.hash_tree_root(head_block) \
-            if start_slot == head_state.slot \
+        start_slot = spec.compute_start_slot_at_epoch(
+            spec.get_current_epoch(head_state)
+        )
+        epoch_boundary_block_root = (
+            spec.hash_tree_root(head_block)
+            if start_slot == head_state.slot
             else spec.get_block_root(head_state, spec.get_current_epoch(head_state))
+        )
 
         # Create Attestation for every managed Validator who is supposed to attest
         for (validator_index, validator) in attesting_validators.items():
@@ -670,52 +806,81 @@ class BeaconClient(Process):
             # 1: Index of the validator inside the committee
             # 2: Size of the committee
             validator_committee = self.committee[self.current_slot][validator_index][0]
-            attestation_data = self.produce_attestation_data(validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state)
+            attestation_data = self.produce_attestation_data(
+                validator_index,
+                validator_committee,
+                epoch_boundary_block_root,
+                head_block,
+                head_state,
+            )
             if attestation_data is None:
                 continue
-            attestation = self.produce_attestation(attestation_data, validator_index, validator)
+            attestation = self.produce_attestation(
+                attestation_data, validator_index, validator
+            )
 
             encoded_attestation = attestation.encode_bytes()
             message = MessageEvent(
                 time=self.current_time,
                 priority=30,
                 message=encoded_attestation,
-                message_type='Attestation',
+                message_type="Attestation",
                 fromidx=self.counter,
-                toidx=None
+                toidx=None,
             )
             self.client_to_simulator_queue.put(message)
-            self.attestation_cache.add_attestation(attestation, self.store, marker=message.marker)
+            self.attestation_cache.add_attestation(
+                attestation, self.store, marker=message.marker
+            )
             self.slot_last_attested = self.current_slot.copy()
             self.last_attestation_data[validator_committee] = attestation_data
-            self.log(message.marker, 'AttestationMessageSent')
-            self.log(attestation, 'AttestationSend')
-    
+            self.log(message.marker, "AttestationMessageSent")
+            self.log(attestation, "AttestationSend")
+
     def pre_attest(self):
         pass
-    
-    def produce_attestation_data(self, validator_index, validator_committee, epoch_boundary_block_root, head_block, head_state) -> Optional[spec.AttestationData]:
+
+    def produce_attestation_data(
+        self,
+        validator_index,
+        validator_committee,
+        epoch_boundary_block_root,
+        head_block,
+        head_state,
+    ) -> Optional[spec.AttestationData]:
         return spec.AttestationData(
-                slot=self.current_slot,
-                index=validator_committee,
-                beacon_block_root=spec.hash_tree_root(head_block),
-                source=head_state.current_justified_checkpoint,
-                target=spec.Checkpoint(epoch=spec.get_current_epoch(head_state), root=epoch_boundary_block_root)
-            )
-    
-    def produce_attestation(self, attestation_data, validator_index: spec.ValidatorIndex, validator: Validator, custom_committee=None):
+            slot=self.current_slot,
+            index=validator_committee,
+            beacon_block_root=spec.hash_tree_root(head_block),
+            source=head_state.current_justified_checkpoint,
+            target=spec.Checkpoint(
+                epoch=spec.get_current_epoch(head_state), root=epoch_boundary_block_root
+            ),
+        )
+
+    def produce_attestation(
+        self,
+        attestation_data,
+        validator_index: spec.ValidatorIndex,
+        validator: Validator,
+        custom_committee=None,
+    ):
         committee = custom_committee if custom_committee is not None else self.committee
         aggregation_bits_list = list(
             0 for _ in range(committee[self.current_slot][validator_index][2])
         )
         aggregation_bits_list[committee[self.current_slot][validator_index][1]] = 1
         # noinspection PyArgumentList
-        aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](*aggregation_bits_list)
+        aggregation_bits = Bitlist[spec.MAX_VALIDATORS_PER_COMMITTEE](
+            *aggregation_bits_list
+        )
 
         return spec.Attestation(
             data=attestation_data,
             aggregation_bits=aggregation_bits,
-            signature=spec.get_attestation_signature(self.state, attestation_data, validator.privkey)
+            signature=spec.get_attestation_signature(
+                self.state, attestation_data, validator.privkey
+            ),
         )
 
     def compute_head(self):
@@ -727,29 +892,36 @@ class BeaconClient(Process):
         if self.state.slot < self.current_slot:
             spec.process_slots(self.head_state, self.current_slot)
 
-
     def slashed(self, validator: Optional[spec.ValidatorIndex] = None) -> bool:
         if self.state.validators[validator].slashed:
-            print(f'[BEACON CLIENT {self.counter}] Excluding Validator {validator} beacuse of slashing')
+            print(
+                f"[BEACON CLIENT {self.counter}] Excluding Validator {validator} beacuse of slashing"
+            )
         return self.state.validators[validator].slashed
 
-    def __attesting_validators_at_current_slot(self) -> Dict[spec.ValidatorIndex, Validator]:
+    def __attesting_validators_at_current_slot(
+        self,
+    ) -> Dict[spec.ValidatorIndex, Validator]:
         return self.attesting_validators_at_slot(self.current_slot)
-    
-    def attesting_validators_at_slot(self, slot: spec.Slot, committee=None) -> Dict[spec.ValidatorIndex, Validator]:
+
+    def attesting_validators_at_slot(
+        self, slot: spec.Slot, committee=None
+    ) -> Dict[spec.ValidatorIndex, Validator]:
         committee = self.committee if committee is None else committee
         assert slot in self.committee
-        attesting_indices = set(validator.index for validator in self.validators) \
-            .intersection(set(committee[slot].keys()))
-        attesting_validators: Dict[spec.ValidatorIndex, Validator] = {validator.index: validator
-                                                                      for validator in self.validators
-                                                                      if validator.index in attesting_indices
-                                                                      and not self.slashed(validator.index)}
+        attesting_indices = set(
+            validator.index for validator in self.validators
+        ).intersection(set(committee[slot].keys()))
+        attesting_validators: Dict[spec.ValidatorIndex, Validator] = {
+            validator.index: validator
+            for validator in self.validators
+            if validator.index in attesting_indices
+            and not self.slashed(validator.index)
+        }
         return attesting_validators
 
     def __validators_by_index(self) -> Dict[spec.ValidatorIndex, Validator]:
-        return {validator.index: validator
-                for validator in self.validators}
+        return {validator.index: validator for validator in self.validators}
 
     @staticmethod
     def __validator_color(validator: spec.ValidatorIndex):
@@ -757,8 +929,13 @@ class BeaconClient(Process):
 
     def graph(self, show=True, balance=False):
         balances = {}
-        g = Digraph('G', filename=f'graph_{int(time.time())}_{self.counter}_{self.current_slot}.gv')
-        blocks_by_slot_and_epoch: Dict[spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]] = {}
+        g = Digraph(
+            "G",
+            filename=f"graph_{int(time.time())}_{self.counter}_{self.current_slot}.gv",
+        )
+        blocks_by_slot_and_epoch: Dict[
+            spec.Epoch, Dict[spec.Slot, List[Tuple[spec.Root, spec.BeaconBlock]]]
+        ] = {}
         for root, block in self.block_cache.blocks.items():
             block = block.message
             epoch = spec.compute_epoch_at_slot(block.slot)
@@ -769,48 +946,63 @@ class BeaconClient(Process):
                 blocks_by_slot_and_epoch[epoch][slot] = []
             blocks_by_slot_and_epoch[epoch][slot].append((root, block))
 
-        justified_epoch, justified_root = self.store.justified_checkpoint.epoch, self.store.justified_checkpoint.root
-        finalized_epoch, finalized_root = self.store.finalized_checkpoint.epoch, self.store.finalized_checkpoint.root
+        justified_epoch, justified_root = (
+            self.store.justified_checkpoint.epoch,
+            self.store.justified_checkpoint.root,
+        )
+        finalized_epoch, finalized_root = (
+            self.store.finalized_checkpoint.epoch,
+            self.store.finalized_checkpoint.root,
+        )
         head_root = self.head_root
         for epoch in blocks_by_slot_and_epoch.keys():
-            with g.subgraph(name=f'cluster_epoch_{int(epoch)}') as e:
-                e.attr(label=f'Epoch {int(epoch)}')
-                epoch_style = 'solid'
-                epoch_color = 'grey'
+            with g.subgraph(name=f"cluster_epoch_{int(epoch)}") as e:
+                e.attr(label=f"Epoch {int(epoch)}")
+                epoch_style = "solid"
+                epoch_color = "grey"
                 if epoch <= justified_epoch:
-                    epoch_style = 'solid'
-                    epoch_color = 'black'
+                    epoch_style = "solid"
+                    epoch_color = "black"
                 if epoch <= finalized_epoch:
-                    epoch_style = 'bold'
-                    epoch_color = 'black'
+                    epoch_style = "bold"
+                    epoch_color = "black"
                 e.attr(color=epoch_color, style=epoch_style)
                 for slot in blocks_by_slot_and_epoch[epoch].keys():
-                    with e.subgraph(name=f'cluster_slot_{int(slot)}') as s:
-                        s.attr(label=f'Slot {int(slot)}', style='dashed')
+                    with e.subgraph(name=f"cluster_slot_{int(slot)}") as s:
+                        s.attr(label=f"Slot {int(slot)}", style="dashed")
                         # print(f'At slot: {int(slot)}')
                         for root, block in blocks_by_slot_and_epoch[epoch][slot]:
                             color = self.__validator_color(block.proposer_index)
-                            shape = 'box'
+                            shape = "box"
                             if root == head_root:
-                                shape = 'octagon'
+                                shape = "octagon"
                             if root == justified_root:
-                                shape = 'doubleoctagon'
+                                shape = "doubleoctagon"
                             if root == finalized_root:
-                                shape = 'tripleoctagon'
-                            s.node(str(root), shape=shape, color=color, style='filled')
-                            
+                                shape = "tripleoctagon"
+                            s.node(str(root), shape=shape, color=color, style="filled")
+
         for epoch in blocks_by_slot_and_epoch.keys():
             for slot in blocks_by_slot_and_epoch[epoch].keys():
                 for root, block in blocks_by_slot_and_epoch[epoch][slot]:
                     g.edge(str(root), str(block.parent_root))
-                    if balance and spec.compute_epoch_at_slot(block.slot) >= justified_epoch and root in self.store.blocks:
+                    if (
+                        balance
+                        and spec.compute_epoch_at_slot(block.slot) >= justified_epoch
+                        and root in self.store.blocks
+                    ):
                         if root not in balances:
-                            balances[root] = int(int(spec.get_latest_attesting_balance(self.store, root)) / 10**9)
-                        g.node(f"{str(balances[root])} ETH (S{slot})", shape='doublecircle')
+                            balances[root] = int(
+                                int(spec.get_latest_attesting_balance(self.store, root))
+                                / 10 ** 9
+                            )
+                        g.node(
+                            f"{str(balances[root])} ETH (S{slot})", shape="doublecircle"
+                        )
                         g.edge(f"{str(balances[root])} ETH (S{slot})", str(root))
         for validator, message in self.store.latest_messages.items():
             color = self.__validator_color(validator)
-            g.node(str(validator), shape='circle', color=color, style='filled')
+            g.node(str(validator), shape="circle", color=color, style="filled")
             g.edge(str(validator), str(message.root))
         # print(blocks_by_slot_and_epoch)
 
@@ -823,12 +1015,15 @@ class BeaconClient(Process):
         self.indexed_validators = dict()
         for builder in self.validator_builders:
             for _ in range(0, builder.validators_count):
-                validator: Validator = builder.build(False, self.validator_first_counter + len(self.validators))
+                validator: Validator = builder.build(
+                    False, self.validator_first_counter + len(self.validators)
+                )
                 self.validators.append(validator)
                 self.indexed_validators[validator.counter] = validator
 
 
 # Statistics
+
 
 @dataclass
 class Statistics:
@@ -861,34 +1056,56 @@ def statistics(client: BeaconClient) -> Statistics:
         current_slot=client.current_slot,
         current_epoch=spec.compute_epoch_at_slot(client.current_slot),
         head=str(client.head_root),
-        finalized=(str(client.store.finalized_checkpoint.root),
-                   int(client.store.blocks[client.store.finalized_checkpoint.root].slot),
-                   int(client.store.finalized_checkpoint.epoch)),
-        justified=(str(client.store.justified_checkpoint.root),
-                   int(client.store.blocks[client.store.justified_checkpoint.root].slot),
-                   int(client.store.justified_checkpoint.epoch)),
+        finalized=(
+            str(client.store.finalized_checkpoint.root),
+            int(client.store.blocks[client.store.finalized_checkpoint.root].slot),
+            int(client.store.finalized_checkpoint.epoch),
+        ),
+        justified=(
+            str(client.store.justified_checkpoint.root),
+            int(client.store.blocks[client.store.justified_checkpoint.root].slot),
+            int(client.store.justified_checkpoint.epoch),
+        ),
         head_balance=spec.get_latest_attesting_balance(client.store, client.head_root),
-        finalized_balance=spec.get_latest_attesting_balance(client.store, client.store.finalized_checkpoint.root),
-        justified_balance=spec.get_latest_attesting_balance(client.store, client.store.justified_checkpoint.root),
+        finalized_balance=spec.get_latest_attesting_balance(
+            client.store, client.store.finalized_checkpoint.root
+        ),
+        justified_balance=spec.get_latest_attesting_balance(
+            client.store, client.store.justified_checkpoint.root
+        ),
         leafs=tuple(str(root) for root in get_leaf_blocks(client.store, None)),
-        leafs_since_justification=tuple(str(root) for root in get_leaf_blocks(client.store,
-                                                                              client.store.justified_checkpoint.root)),
-        leafs_since_finalization=tuple(str(root) for root in get_leaf_blocks(client.store,
-                                                                             client.store.finalized_checkpoint.root)),
+        leafs_since_justification=tuple(
+            str(root)
+            for root in get_leaf_blocks(
+                client.store, client.store.justified_checkpoint.root
+            )
+        ),
+        leafs_since_finalization=tuple(
+            str(root)
+            for root in get_leaf_blocks(
+                client.store, client.store.finalized_checkpoint.root
+            )
+        ),
         orphans=get_orphans(client.store),
-        attester_slashings=client.slashings['attester'],
-        proposer_slashings=client.slashings['proposer'],
+        attester_slashings=client.slashings["attester"],
+        proposer_slashings=client.slashings["proposer"],
         finality_delay=spec.get_finality_delay(client.state),
-        validators_left=tuple((spec.ValidatorIndex(v[0]), v[1].exit_epoch)
-                              for v in enumerate(client.state.validators)
-                              if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH),
+        validators_left=tuple(
+            (spec.ValidatorIndex(v[0]), v[1].exit_epoch)
+            for v in enumerate(client.state.validators)
+            if v[1].exit_epoch != spec.FAR_FUTURE_EPOCH
+        ),
         current_base_reward=spec.get_base_reward(client.state, spec.ValidatorIndex(0)),
-        balances={index: client.state.balances[index]
-                  for index, _ in enumerate(client.state.validators)}
+        balances={
+            index: client.state.balances[index]
+            for index, _ in enumerate(client.state.validators)
+        },
     )
 
 
-def get_leaf_blocks(store: spec.Store, forced_parent: Optional[spec.Root]) -> Set[spec.Root]:
+def get_leaf_blocks(
+    store: spec.Store, forced_parent: Optional[spec.Root]
+) -> Set[spec.Root]:
     blocks = set(store.blocks.keys())
     if forced_parent:
         blocks = get_chain_blocks(store, forced_parent)
@@ -912,12 +1129,15 @@ def get_chain_blocks(store: spec.Store, base_block: spec.Root) -> Set[spec.Root]
 
 
 def get_children(store: spec.Store, parent: spec.Root) -> Set[spec.Root]:
-    children = set(root for root, block in store.blocks.items() if block.parent_root == parent)
+    children = set(
+        root for root, block in store.blocks.items() if block.parent_root == parent
+    )
     return children
 
 
 def get_orphans(store: spec.Store) -> Sequence[Tuple[str, int]]:
-    return tuple((str(root), int(block.slot))
-                 for root, block in store.blocks.items()
-                 if block.parent_root not in store.blocks)
-
+    return tuple(
+        (str(root), int(block.slot))
+        for root, block in store.blocks.items()
+        if block.parent_root not in store.blocks
+    )

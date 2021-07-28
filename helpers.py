@@ -29,11 +29,12 @@ def queue_element_or_none(queue: Queue) -> Optional[Any]:
     except Empty:
         return None
 
+
 def process_mocked_deposit(spec, state, deposit, check_included=False) -> None:
     # --------------------------------
     # No check for valid merkle branch
     # --------------------------------
-    
+
     # Deposits must be processed in order
     state.eth1_deposit_index += 1
 
@@ -53,10 +54,10 @@ def process_mocked_deposit(spec, state, deposit, check_included=False) -> None:
         index = spec.ValidatorIndex(validator_pubkeys.index(pubkey))
         spec.increase_balance(state, index, amount)
 
-def initialize_beacon_state_from_mocked_eth1(spec,
-                                             eth1_block_hash: Bytes32,
-                                             eth1_timestamp: uint64,
-                                             deposits: Sequence) -> Any:
+
+def initialize_beacon_state_from_mocked_eth1(
+    spec, eth1_block_hash: Bytes32, eth1_timestamp: uint64, deposits: Sequence
+) -> Any:
     fork = spec.Fork(
         previous_version=spec.GENESIS_FORK_VERSION,
         current_version=spec.GENESIS_FORK_VERSION,
@@ -65,9 +66,14 @@ def initialize_beacon_state_from_mocked_eth1(spec,
     state = spec.BeaconState(
         genesis_time=eth1_timestamp + spec.GENESIS_DELAY,
         fork=fork,
-        eth1_data=spec.Eth1Data(block_hash=eth1_block_hash, deposit_count=len(deposits)),
-        latest_block_header=spec.BeaconBlockHeader(body_root=spec.hash_tree_root(spec.BeaconBlockBody())),
-        randao_mixes=[eth1_block_hash] * spec.EPOCHS_PER_HISTORICAL_VECTOR,  # Seed RANDAO with Eth1 entropy
+        eth1_data=spec.Eth1Data(
+            block_hash=eth1_block_hash, deposit_count=len(deposits)
+        ),
+        latest_block_header=spec.BeaconBlockHeader(
+            body_root=spec.hash_tree_root(spec.BeaconBlockBody())
+        ),
+        randao_mixes=[eth1_block_hash]
+        * spec.EPOCHS_PER_HISTORICAL_VECTOR,  # Seed RANDAO with Eth1 entropy
     )
 
     # Process deposits
@@ -81,7 +87,9 @@ def initialize_beacon_state_from_mocked_eth1(spec,
         # ------------------------------------------------
         process_mocked_deposit(spec, state, deposit, check_included=False)
         last_index = index
-    deposit_data_list = ssz_typing.List[spec.DepositData, 2**spec.DEPOSIT_CONTRACT_TREE_DEPTH](*leaves[:last_index + 1])
+    deposit_data_list = ssz_typing.List[
+        spec.DepositData, 2 ** spec.DEPOSIT_CONTRACT_TREE_DEPTH
+    ](*leaves[: last_index + 1])
     state.eth1_data.deposit_root = spec.hash_tree_root(deposit_data_list)
 
     # Process activations
@@ -89,7 +97,10 @@ def initialize_beacon_state_from_mocked_eth1(spec,
         if index % 1000 == 0:
             print(f"[SIMULATOR][State] Validator #{index}")
         balance = state.balances[index]
-        validator.effective_balance = min(balance - balance % spec.EFFECTIVE_BALANCE_INCREMENT, spec.MAX_EFFECTIVE_BALANCE)
+        validator.effective_balance = min(
+            balance - balance % spec.EFFECTIVE_BALANCE_INCREMENT,
+            spec.MAX_EFFECTIVE_BALANCE,
+        )
         if validator.effective_balance == spec.MAX_EFFECTIVE_BALANCE:
             validator.activation_eligibility_epoch = spec.GENESIS_EPOCH
             validator.activation_epoch = spec.GENESIS_EPOCH

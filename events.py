@@ -7,7 +7,9 @@ from eth2spec.phase0 import spec
 from random import randint
 
 
-MESSAGE_TYPE = Union[spec.Attestation, spec.SignedAggregateAndProof, spec.SignedBeaconBlock]
+MESSAGE_TYPE = Union[
+    spec.Attestation, spec.SignedAggregateAndProof, spec.SignedBeaconBlock
+]
 
 """
 For keeping determinism, every Event has gained a field `priority`.
@@ -26,7 +28,11 @@ class Event:
     priority: int
 
     def __lt__(self, other):
-        return self.priority < other.priority if self.time == other.time else self.time < other.time
+        return (
+            self.priority < other.priority
+            if self.time == other.time
+            else self.time < other.time
+        )
 
 
 @dataclass
