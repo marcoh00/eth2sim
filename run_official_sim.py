@@ -167,9 +167,9 @@ def simulation10(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 2)\
-        .beacon_client(128)\
+        .beacon_client(32)\
             .set_debug(True)\
-            .validators(2)\
+            .validators(8)\
             .build()\
         .build()\
         .build()
@@ -179,9 +179,9 @@ def simulation11(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 8)\
-        .beacon_client(128)\
+        .beacon_client(32)\
             .set_debug(True)\
-            .validators(2)\
+            .validators(8)\
             .build()\
         .build()\
         .build()
@@ -285,9 +285,9 @@ def simulation17(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(128)\
+        .beacon_client(32)\
             .set_debug(True)\
-            .validators(2)\
+            .validators(8)\
             .build()\
         .build()\
         .build()
