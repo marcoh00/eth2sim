@@ -6,17 +6,22 @@ import hashlib
 from events import MessageEvent, MESSAGE_TYPE
 
 USE_RANDOM_LATENCY = True
-LATENCY_MAP_BLOCK = ((0, 0), (51, 1), (230, 2))
+LATENCY_MAP_BLOCK = ((0, 0), (26, 1), (102, 2), (230, 3))
 LATENCY_MAP_AGG_ATTESTATION = (
     (0, 0),
-    (102, 1),
-    (153, 2),
-    (179, 4),
-    (204, 6),
-    (230, 9),
-    (242, 10),
+    (51, 1),
+    (128, 2),
+    (179, 5),
+    (204, 7),
+    (230, 10),
+    (242, 11),
 )
-LATENCY_MAP_ATTESTATION = ((0, 0), (78, 1), (179, 2), (204, 3), (230, 4), (242, 5))
+LATENCY_MAP_ATTESTATION = (
+    (0, 0),
+    (128, 1),
+    (179, 2),
+    (230, 4)
+)
 LATENCY_MAP_GT = LATENCY_MAP_AGG_ATTESTATION
 
 
