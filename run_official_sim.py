@@ -166,7 +166,7 @@ def simulation10(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .set_custom_latency_map(None, modifier=lambda latency: latency * 4)\
+        .set_custom_latency_map(None, modifier=lambda latency: latency * 2)\
         .beacon_client(128)\
             .set_debug(True)\
             .validators(2)\
@@ -281,6 +281,17 @@ def simulation16(config, blockhash):
         .build()\
         .build()
 
+def simulation17(config, blockhash):
+    # fmt: off
+    return SimulationBuilder('../../configs', config, blockhash)\
+        .set_end_time(1844674407370955161)\
+        .beacon_client(128)\
+            .set_debug(True)\
+            .validators(2)\
+            .build()\
+        .build()\
+        .build()
+
 def main():
     # 0 minimal 
     simtype = int(sys.argv[1])
@@ -296,14 +307,17 @@ def main():
         7:  ('mainnet', simulation7), # mainnet, 8/16384
         8:  ('mainnet', simulation8), # mainnet, 4/13581
         9:  ('mainnet', simulation9), # mainnet, 8/13581
-        10: ('minimal', simulation10), # latency, 128/256
+        10: ('mainnet-minimized', simulation10), # latency, 128/256
         11: ('mainnet-minimized', simulation11), # latency, 128/256
         12: ('minimal', simulation12), # proposer slashing
         13: ('minimal', simulation13), # attester slashings
         14: ('mainnet-minimized', simulation14), # latency, 128/256
         15: ('minimal', simulation15), # time attacked
-        16: ('minimal', simulation16) # balancing attacking
+        16: ('minimal', simulation16), # balancing attacking
+        17: ('mainnet-minimized', simulation17) # paper: 128*2
     }
+    # 10, 11, 12, 13, 15, 16, 17
+    # xx  xx                  xx
     mocked = simtype > 2
     mocked_filename = "mocked_" if mocked else ""
 
