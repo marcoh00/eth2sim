@@ -133,26 +133,46 @@ mv *.json *.prof *.gv *.pdf old
 #mkdir -p 14.2
 #mv *.json *.gv *.pdf *.out *.err *.prof 14.2
 
-sleep 10
-python3 -u run_official_sim.py 17 > 17.out 2> 17.err &
-sleep 10
-python pidstat_parse.py python3 43200 1 pidstat17.json 1
-killall -9 python3
-mkdir -p 17
-mv *.json *.gv *.pdf *.out *.err *.prof 17
+# sleep 10
+# python3 -u run_official_sim.py 17 > 17.out 2> 17.err &
+# sleep 10
+# python pidstat_parse.py python3 43200 1 pidstat17.json 1
+# killall -9 python3
+# mkdir -p 17
+# mv *.json *.gv *.pdf *.out *.err *.prof 17
+
+# sleep 10
+# python3 -u run_official_sim.py 10 > 10.out 2> 10.err &
+# sleep 10
+# python pidstat_parse.py python3 43200 1 pidstat10.json 1
+# killall -9 python3
+# mkdir -p 10
+# mv *.json *.gv *.pdf *.out *.err *.prof 10
+
+# sleep 10
+# python3 -u run_official_sim.py 11 > 11.out 2> 11.err &
+# sleep 10
+# python pidstat_parse.py python3 43200 1 pidstat11.json 1
+# killall -9 python3
+# mkdir -p 11
+# mv *.json *.gv *.pdf *.out *.err *.prof 11
 
 sleep 10
-python3 -u run_official_sim.py 10 > 10.out 2> 10.err &
-sleep 10
-python pidstat_parse.py python3 43200 1 pidstat10.json 1
-killall -9 python3
-mkdir -p 10
-mv *.json *.gv *.pdf *.out *.err *.prof 10
+python3 -u run_official_sim.py 12 > 12.out 2> 12.err
+mkdir -p 12
+mv *.json *.gv *.pdf *.out *.err *.prof 12
 
 sleep 10
-python3 -u run_official_sim.py 11 > 11.out 2> 11.err &
+python3 -u run_official_sim.py 13 > 13.out 2> 13.err
+mkdir -p 13
+mv *.json *.gv *.pdf *.out *.err *.prof 13
+
 sleep 10
-python pidstat_parse.py python3 43200 1 pidstat11.json 1
-killall -9 python3
-mkdir -p 11
-mv *.json *.gv *.pdf *.out *.err *.prof 11
+python3 -u run_official_sim.py 15 > 15.out 2> 15.err
+mkdir -p 15
+mv *.json *.gv *.pdf *.out *.err *.prof 15
+
+sleep 10
+python3 -u run_official_sim.py 16 > 16.out 2> 16.err
+mkdir -p 16
+mv *.json *.gv *.pdf *.out *.err *.prof 16
