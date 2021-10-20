@@ -42,13 +42,21 @@ def collect_by_epoch(
 
 
 def main():
-    # usage: infile runtime[h] slottime[s]
+    # usage: infile runtime[h] slottime[s] [maxslot]
     infile = sys.argv[1]
     runtime_h = float(sys.argv[2])
 
     data = []
     with open(infile, "r", encoding="utf-8") as fp:
         data = json.load(fp)
+    if len(sys.argv) == 5:
+        maxslot = int(sys.argv[4])
+        maxidx = 0
+        for idx in range(len(data)):
+            if data[idx]["current_slot"] <= maxslot:
+                maxidx = idx
+        print(f"limit to slot {maxslot} at datapoint {maxidx}")
+        data = data[0:maxidx]
 
     slots_per_hour = calc_slots_h(data, runtime_h)
     mean_finality_delay = collect_by_epoch(
