@@ -430,9 +430,6 @@ class BeaconClient(Process):
                 },
                 "FindNewStateRootError",
             )
-            self.client_to_simulator_queue.put(
-                SimulationEndEvent(time=self.current_time, priority=0, message=text)
-            )
             return
         block.state_root = new_state_root
         signed_block = spec.SignedBeaconBlock(
@@ -503,10 +500,14 @@ class BeaconClient(Process):
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
                 print(f"[BEACON CLIENT {self.counter}] Could not validate attestation")
+                self.attestation_cache.deny_attestation(attestation)
                 self.log(
                     {"line": line, "text": text, "attestation": str(attestation)},
                     "ValidateAttestationOnSlotBoundaryError",
                 )
+            except IndexError:
+                self.attestation_cache.deny_attestation(attestation)
+                self.log({"attestation": str(attestation)}, "ValidateAttestationOnSlotBoundaryIndexError")
 
         head_state = self.state.copy()
         if head_state.slot < self.current_slot:

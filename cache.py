@@ -16,6 +16,7 @@ class CachedAttestation:
     ]
     seen_in_block: bool
     known_to_forkchoice: bool
+    denied: True
     attestation: spec.Attestation
 
     def into_indexed_attestation(self) -> spec.IndexedAttestation:
@@ -32,7 +33,8 @@ class CachedAttestation:
             attesting_indices=indexed_attestation.attesting_indices,
             seen_in_block=False,
             known_to_forkchoice=False,
-            attestation=attestation,
+            denied=False,
+            attestation=attestation
         )
 
 
@@ -126,6 +128,12 @@ class AttestationCache:
             cached_attestation.known_to_forkchoice = True
         if block:
             cached_attestation.seen_in_block = True
+    
+    def deny_attestation(
+        self, attestation: spec.Attestation
+    ):
+        cached = self.__find_attestaion(attestation)
+        cached.denied = True
 
     def add_queued_attestations(self, store: spec.Store):
         if self.queued_attestations is None:
@@ -157,14 +165,14 @@ class AttestationCache:
         self, min_slot: spec.Slot, max_slot: spec.Slot
     ) -> Iterable[spec.Attestation]:
         yield from self.filter_attestations(
-            min_slot, max_slot, lambda a: not a.known_to_forkchoice
+            min_slot, max_slot, lambda a: not a.known_to_forkchoice and not a.denied
         )
 
     def attestations_not_seen_in_block(
         self, min_slot: spec.Slot, max_slot: spec.Slot
     ) -> Iterable[spec.Attestation]:
         yield from self.filter_attestations(
-            min_slot, max_slot, lambda a: not a.seen_in_block and a.known_to_forkchoice
+            min_slot, max_slot, lambda a: not a.seen_in_block and a.known_to_forkchoice and not a.denied
         )
 
     def filter_attestations(
