@@ -211,7 +211,7 @@ def simulation13(config, blockhash):
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
         .beacon_client(1)\
             .set_debug(True)\
-            .set_mode('AttesterSlashingTooLow')\
+            .set_mode('AttesterSlashingSameHeight')\
             .validators(32)\
             .build()\
         .build()\
@@ -220,6 +220,7 @@ def simulation13(config, blockhash):
             .set_mode('AttesterSlashingWithinSpan')\
             .validators(32)\
             .build()\
+        .build()\
         .beacon_client(6)\
             .set_debug(True)\
             .validators(32)\
