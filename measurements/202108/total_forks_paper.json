@@ -1,0 +1,32 @@
+{
+  "params": [
+    "prometheus_query.py",
+    "-q",
+    "increase(beacon_fork_choice_reorg_total[1641600s])",
+    "-t",
+    "1629244800",
+    "-o",
+    "total_forks_paper.json",
+    "custom"
+  ],
+  "results": {
+    "http://ubuntu:9090/api/v1/query?query=increase(beacon_fork_choice_reorg_total[1641600s])&time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {
+              "instance": "localhost:9092",
+              "job": "lighthouse"
+            },
+            "value": [
+              1629244800,
+              "38.00034722539497"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

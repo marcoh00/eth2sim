@@ -10,6 +10,7 @@ cryptokeys/
 state/
 
 *.json
+!measurements/**/*.json
 *.pdf
 *.gv
 *.profile

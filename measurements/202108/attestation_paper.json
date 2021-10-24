@@ -1,0 +1,193 @@
+{
+  "params": [
+    "prometheus_query.py",
+    "-m",
+    "attestation_gossip_slot_start_delay_time_bucket",
+    "-n",
+    "0.95",
+    "0.9",
+    "0.8",
+    "0.7",
+    "0.6",
+    "0.5",
+    "0.4",
+    "0.3",
+    "0.2",
+    "0.1",
+    "0.05",
+    "-b",
+    "19d",
+    "-t",
+    "1629244800",
+    "-o",
+    "attestation_paper.json",
+    "quantile"
+  ],
+  "results": {
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.95, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "8.298512754154139"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.9, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "7.4629312329309805"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.8, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "6.310560175396256"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.7, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "5.613939158703568"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.6, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "5.0854530706794225"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.5, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "4.556966982655278"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.4, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "4.028480894631134"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.3, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "3.03815359297057"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.2, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "2.021519262671698"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.1, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "1.0048849323728253"
+            ]
+          }
+        ]
+      }
+    },
+    "http://ubuntu:9090/api/v1/query?query=histogram_quantile(0.05, sum(rate(attestation_gossip_slot_start_delay_time_bucket[19d])) by (le)) &time=1629244800": {
+      "status": "success",
+      "data": {
+        "resultType": "vector",
+        "result": [
+          {
+            "metric": {},
+            "value": [
+              1629244800,
+              "0.7255775376558251"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}
