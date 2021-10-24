@@ -40,7 +40,7 @@ pipenv install graphviz
 
 ```bash
 mkdir build
-git clone /PATH/TO/GIT/BUNDLE build/lib
+git clone https://github.com/marcoh00/eth2sim.git build/lib
 ```
 
 - Extract the Ethereum 2.0 specification python code into the `build/lib` directory
@@ -54,9 +54,22 @@ python setup.py build_py
 
 - If needed: Copy directories with configuration files like `mainnet-minimized` to `configs`.
 
-- Run simulator code, for example the first minimal simulation (numbers correspond to the 'Nr.' column in table 5.8):
+- Run simulator code, for example a minimal simulation:
 
 ```bash
 cd build/lib
 python run_official_sim.py 0
 ```
+
+# Simulations inside "Simulating an Ethereum 2.0 Beacon Chain Network" paper
+
+Simulations conducted for the paper can be run using the `run_official_sim.py` script, too.
+They have the following numbers:
+
+- 10 (latency x2)
+- 11 (latency x8)
+- 12 (block slashing)
+- 13 (attester slashing)
+- 15 (time attack)
+- 16 (balancing attack)
+- 17 (based on measurements)
