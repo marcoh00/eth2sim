@@ -51,7 +51,7 @@ def main():
     simulator = SimulationBuilder('../../configs', 'minimal', eth1blockhash)\
     .set_end_time(calc_simtime(slot=1, epoch=13))\
     .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-    .beacon_client(1)\
+    .beacon_node(1)\
         .set_debug(True)\
         .set_mode('TimeAttacked')\
         .set_attackinfo({
@@ -62,12 +62,12 @@ def main():
         .validators(1)\
         .build()\
     .build()\
-    .beacon_client(1)\
+    .beacon_node(1)\
         .set_debug(True)\
         .validators(254)\
         .build()\
     .build()\
-    .beacon_client(1)\
+    .beacon_node(1)\
         .validators(1)\
         .build()\
     .build()\

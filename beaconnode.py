@@ -24,7 +24,7 @@ from colors import COLORS
 from eth2spec.config import config_util
 from events import (
     NextSlotEvent,
-    BeaconClientInfo,
+    BeaconNodeInfo,
     LatestVoteOpportunity,
     AggregateOpportunity,
     MessageEvent,
@@ -38,7 +38,7 @@ from helpers import queue_element_or_none
 from validator import Validator, ValidatorBuilder
 
 
-class BeaconClient(Process):
+class BeaconNode(Process):
     counter: int
     simulator_to_client_queue: JoinableQueue
     client_to_simulator_queue: Queue
@@ -138,7 +138,7 @@ class BeaconClient(Process):
 
     def run(self):
         print(
-            f"[BEACON CLIENT {self.counter}] Beacon Client started. Process PID is {os.getpid()}."
+            f"[BEACON NODE {self.counter}] Beacon Node started. Process PID is {os.getpid()}."
         )
         config_util.prepare_config(self.specconf[0], self.specconf[1])
         # noinspection PyTypeChecker
@@ -156,7 +156,7 @@ class BeaconClient(Process):
             pr.dump_stats(f"profile_{self.counter}_{time.time()}.prof")
         if self.debug:
             self.debugfile.close()
-        print(f"[BEACON CLIENT {self.counter}] Terminate process")
+        print(f"[BEACON NODE {self.counter}] Terminate process")
 
     def __handle_event(self, event: Event):
         if event.time < self.current_time:
@@ -179,13 +179,13 @@ class BeaconClient(Process):
             NextSlotEvent: self.handle_next_slot_event,
             ProduceStatisticsEvent: self.handle_statistics_event,
             ProduceGraphEvent: self.produce_graph_event,
-            BeaconClientInfo: self.handle_beacon_client_info,
+            BeaconNodeInfo: self.handle_beacon_node_info,
         }
         # noinspection PyArgumentList,PyTypeChecker
         self.pre_event_handling(event)
         actions[type(event)](event)
 
-    def handle_beacon_client_info(self, event: BeaconClientInfo):
+    def handle_beacon_node_info(self, event: BeaconNodeInfo):
         pass
 
     def pre_event_handling(self, event: Event):
@@ -241,20 +241,20 @@ class BeaconClient(Process):
         self.graph(event.show)
 
     def handle_genesis_state(self, state: spec.BeaconState, marker=None):
-        print(f"[BEACON CLIENT {self.counter}] Initialize state from Genesis State")
+        print(f"[BEACON NODE {self.counter}] Initialize state from Genesis State")
         self.state = state
         for validator in self.validators:
             validator.index_from_state(state)
 
     def handle_genesis_block(self, block: spec.BeaconBlock, marker=None):
         print(
-            f"[BEACON CLIENT {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block"
+            f"[BEACON NODE {self.counter}] Initialize Fork Choice and BlockCache with Genesis Block"
         )
         self.store = spec.get_forkchoice_store(self.state, block)
         self.block_cache = BlockCache(block)
         self.head_root = spec.hash_tree_root(block)
         print(
-            f"[BEACON CLIENT {self.counter}] Initialize committee cache for first epoch"
+            f"[BEACON NODE {self.counter}] Initialize committee cache for first epoch"
         )
         self.update_committee(spec.Epoch(0), genesis=True)
 
@@ -264,7 +264,7 @@ class BeaconClient(Process):
         if self.debug and pathlib.Path(statsfile).is_file():
             with open(statsfile, "a", encoding="utf-8") as fp:
                 fp.write("]")
-        print(f"[BEACON CLIENT {self.counter}] Received SimulationEndEvent")
+        print(f"[BEACON NODE {self.counter}] Received SimulationEndEvent")
         time.sleep(3)
         # Mark all remaining tasks as done
         next_task = queue_element_or_none(self.simulator_to_client_queue)
@@ -319,7 +319,7 @@ class BeaconClient(Process):
         self, validator: Validator, head_state: spec.BeaconState, slashme=False
     ):
         print(
-            f"[BEACON CLIENT {self.counter}] Create block for Validator {self.proposer_current_slot}"
+            f"[BEACON NODE {self.counter}] Create block for Validator {self.proposer_current_slot}"
         )
         min_slot_to_include = (
             spec.compute_start_slot_at_epoch(
@@ -499,7 +499,7 @@ class BeaconClient(Process):
                 traceback.print_tb(tb)
                 tb_info = traceback.extract_tb(tb)
                 filename, line, func, text = tb_info[-1]
-                print(f"[BEACON CLIENT {self.counter}] Could not validate attestation")
+                print(f"[BEACON NODE {self.counter}] Could not validate attestation")
                 self.attestation_cache.deny_attestation(attestation)
                 self.log(
                     {"line": line, "text": text, "attestation": str(attestation)},
@@ -558,7 +558,7 @@ class BeaconClient(Process):
             spec.CommitteeIndex(c) for c in range(self.committee_count[current_epoch])
         ):
             # Aggregate all known unaggregated attestations which represent
-            # the same vote this beacon client and its validators attested for
+            # the same vote this Beacon Node and its validators attested for
             attestations_to_aggregate[committee] = [
                 attestationcache.attestation
                 for attestationcache in self.attestation_cache.cache_by_time.get(
@@ -660,7 +660,7 @@ class BeaconClient(Process):
             chain = self.block_cache.chain_for_block(block, self.store)
         except KeyError as e:
             print(
-                f"[BEACON CLIENT {self.counter}] Could not validate block: {e} - parts of chain are missing"
+                f"[BEACON NODE {self.counter}] Could not validate block: {e} - parts of chain are missing"
             )
             chain = []
         self.log(len(chain), "BlocksToHandle")
@@ -671,7 +671,7 @@ class BeaconClient(Process):
         try:
             if block.message.slot > self.current_slot:
                 self.log(
-                    f"[BEACON CLIENT {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])",
+                    f"[BEACON NODE {self.counter}] WARNING: Received block from the future (current slot=[{self.current_slot}] block slot=[{block.message.slot}])",
                     "FutureBlockWarning",
                 )
                 return
@@ -694,16 +694,16 @@ class BeaconClient(Process):
             tb_info = traceback.extract_tb(tb)
             filename, line, func, text = tb_info[-1]
             print(
-                f"[BEACON CLIENT {self.counter}] Could not validate block (assert line {line}, stmt {text})! slot=[{block.message.slot}] proposer_index=[{block.message.proposer_index}] root=[{spec.hash_tree_root(block.message)}] parent_root=[{block.message.parent_root}]"
+                f"[BEACON NODE {self.counter}] Could not validate block (assert line {line}, stmt {text})! slot=[{block.message.slot}] proposer_index=[{block.message.proposer_index}] root=[{spec.hash_tree_root(block.message)}] parent_root=[{block.message.parent_root}]"
             )
             self.handle_invalid_block(block, str(text))
 
     def handle_invalid_block(self, signed_block: spec.SignedBeaconBlock, reason: str):
         """
-        When time attacked beacon clients are inside the simulation, the following happens:
+        When time attacked Beacon Nodes are inside the simulation, the following happens:
             - The time attacked client produces a block, `timedelta` slots later
             - If `timedelta` is big enough, the blocks produced by them will not share the same finalized checkpoint
-            - As such, the blocks will be rejected by the honest beacon clients
+            - As such, the blocks will be rejected by the honest Beacon Nodes
             - Becuase the blocks are rejected, their post-state will never be calculated
             - Because their state is not calculated, the attestation cache cannot determine who attested for them. The attestations are ignored.
             - When the attestations are ignored, the participant will never get slashed
@@ -712,7 +712,7 @@ class BeaconClient(Process):
 
         if "get_ancestor" in reason and "finalized_checkpoint" in reason:
             print(
-                f"[BEACON CLIENT {self.counter}] Add the block to fork choice store, even though it is invalid because of mismatching checkpoints"
+                f"[BEACON NODE {self.counter}] Add the block to fork choice store, even though it is invalid because of mismatching checkpoints"
             )
 
             """
@@ -896,7 +896,7 @@ class BeaconClient(Process):
     def slashed(self, validator: Optional[spec.ValidatorIndex] = None) -> bool:
         if self.state.validators[validator].slashed:
             print(
-                f"[BEACON CLIENT {self.counter}] Excluding Validator {validator} beacuse of slashing"
+                f"[BEACON NODE {self.counter}] Excluding Validator {validator} beacuse of slashing"
             )
         return self.state.validators[validator].slashed
 
@@ -1050,7 +1050,7 @@ class Statistics:
     balances: Dict[int, int]
 
 
-def statistics(client: BeaconClient) -> Statistics:
+def statistics(client: BeaconNode) -> Statistics:
     return Statistics(
         client_index=client.counter,
         current_time=client.current_time,

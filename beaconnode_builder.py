@@ -1,20 +1,20 @@
-from attackingbeaconclient import (
-    TimeAttackedBeaconClient,
-    BalancingAttackingBeaconClient,
+from attackingbeaconnode import (
+    TimeAttackedBeaconNode,
+    BalancingAttackingBeaconNode,
 )
-from slashingbeaconclient import (
+from slashingbeaconnode import (
     AttesterSlashingSameHeightClient,
     AttesterSlashingWithinSpan,
-    BlockSlashingBeaconClient,
+    BlockSlashingBeaconNode,
 )
-from beaconclient import BeaconClient
+from beaconnode import BeaconNode
 from multiprocessing import JoinableQueue, Queue
 from typing import Dict, List, Optional
 from validator import ValidatorBuilder
 from builder import Builder
 
 
-class BeaconClientBuilder(Builder):
+class BeaconNodeBuilder(Builder):
     configpath: str
     configname: str
 
@@ -39,7 +39,7 @@ class BeaconClientBuilder(Builder):
         configname,
         parent_builder=None,
     ):
-        super(BeaconClientBuilder, self).__init__(parent_builder)
+        super(BeaconNodeBuilder, self).__init__(parent_builder)
         self.validator_builders = []
         self.configpath = configpath
         self.configname = configname
@@ -67,7 +67,7 @@ class BeaconClientBuilder(Builder):
             raise ValueError(f"Unknown mode: {self.mode}")
 
         if self.mode == "HONEST":
-            return BeaconClient(
+            return BeaconNode(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,
@@ -80,7 +80,7 @@ class BeaconClientBuilder(Builder):
             )
         elif self.mode == "BlockSlashing":
             print("CONSTRUCT BLOCK SLASHER")
-            return BlockSlashingBeaconClient(
+            return BlockSlashingBeaconNode(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,
@@ -120,7 +120,7 @@ class BeaconClientBuilder(Builder):
         elif self.mode == "TimeAttacked":
             print("CONSTRUCT TIME ATTACKED")
             assert len(self.attackinfo.keys()) == 3
-            return TimeAttackedBeaconClient(
+            return TimeAttackedBeaconNode(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,
@@ -134,7 +134,7 @@ class BeaconClientBuilder(Builder):
             )
         elif self.mode == "BalancingAttacking":
             print("CONSTRUCT BALANCING ATTACKING")
-            return BalancingAttackingBeaconClient(
+            return BalancingAttackingBeaconNode(
                 counter=counter,
                 simulator_to_client_queue=self.simulator_to_client_queue,
                 client_to_simulator_queue=self.client_to_simulator_queue,

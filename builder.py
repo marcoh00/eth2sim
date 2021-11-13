@@ -18,7 +18,7 @@ class Builder:
 
 """
 SimulationBuilder(configpath, configname)
-    .beacon_client(4)
+    .beacon_node(4)
         .debug(True)
         .profile(True)
         .validators(7)

@@ -10,7 +10,7 @@ import datetime
 REGEX_BCSIM = re.compile(r'!!! \[(\d+)] Miner \d+ mined a new Block')
 REGEX_SIMBLOCK = re.compile(r'\[(\d+)] simblock.block.ProofOfWorkBlock@[a-f0-9]*:\d*')
 REGEX_VIBES = re.compile(r'(\d+:\d+:\d+).\d* \[VSystem-akka.actor.default-dispatcher-\d*] DEBUG com.vibes.actors.NodeActor - BLOCK MINED AT LEVEL')
-REGEX_ETH2SIM = re.compile(r'\[(\d+)] Block Message \d+ by Beacon Client \d+')
+REGEX_ETH2SIM = re.compile(r'\[(\d+)] Block Message \d+ by Beacon Node \d+')
 
 MODE_TO_REGEX = {
     'bcsim': REGEX_BCSIM,

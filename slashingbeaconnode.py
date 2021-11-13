@@ -1,9 +1,9 @@
 from eth2spec.phase0 import spec
 from typing import Dict, List, Optional, Tuple
-from beaconclient import BeaconClient
+from beaconnode import BeaconNode
 
 
-class BlockSlashingBeaconClient(BeaconClient):
+class BlockSlashingBeaconNode(BeaconNode):
     def __init__(self, *kargs, **kwargs):
         super().__init__(*kargs, **kwargs)
         print("CONSTRUCTED BLOCK SLASHER")
@@ -13,7 +13,7 @@ class BlockSlashingBeaconClient(BeaconClient):
             self.proposer_current_slot
         ):
             print(
-                f"[BEACON CLIENT {self.counter}] Produce slashable block for validator {self.proposer_current_slot}"
+                f"[BEACON NODE {self.counter}] Produce slashable block for validator {self.proposer_current_slot}"
             )
             self.propose_block(
                 indexed_validators[self.proposer_current_slot], head_state, slashme=True
@@ -21,7 +21,7 @@ class BlockSlashingBeaconClient(BeaconClient):
         return super().post_next_slot_event(head_state, indexed_validators)
 
 
-class AttesterSlashingSameHeightClient(BeaconClient):
+class AttesterSlashingSameHeightClient(BeaconNode):
 
     past_checkpoint: Dict[spec.ValidatorIndex, spec.Checkpoint]
 
@@ -50,19 +50,19 @@ class AttesterSlashingSameHeightClient(BeaconClient):
         if current_epoch > 0:
             if validator_index in self.past_checkpoint:
                 print(
-                    f"[BEACON CLIENT {self.counter}] Use saved Checkpoint to produce a slashable attestation for validator {validator_index}"
+                    f"[BEACON NODE {self.counter}] Use saved Checkpoint to produce a slashable attestation for validator {validator_index}"
                 )
                 attestation_data.target = self.past_checkpoint[validator_index]
             else:
                 print(
-                    f"[BEACON CLIENT {self.counter}] Save Checkpoint for validator {validator_index}"
+                    f"[BEACON NODE {self.counter}] Save Checkpoint for validator {validator_index}"
                 )
                 self.past_checkpoint[validator_index] = attestation_data.target
 
         return attestation_data
 
 
-class AttesterSlashingWithinSpan(BeaconClient):
+class AttesterSlashingWithinSpan(BeaconNode):
 
     first_attestation: Dict[
         spec.ValidatorIndex, Tuple[spec.Checkpoint, spec.Checkpoint]
@@ -99,7 +99,7 @@ class AttesterSlashingWithinSpan(BeaconClient):
         if validator_index not in self.first_attestation:
             # Step 1: Save first known source & target checkpoints
             print(
-                f"[BEACON CLIENT {self.counter}] Save first checkpoint seen for Validator {validator_index}"
+                f"[BEACON NODE {self.counter}] Save first checkpoint seen for Validator {validator_index}"
             )
             self.first_attestation[validator_index] = (
                 attestation_data.source,
@@ -116,7 +116,7 @@ class AttesterSlashingWithinSpan(BeaconClient):
                 > self.first_attestation[validator_index][1].epoch
             ):
                 print(
-                    f"[BEACON CLIENT {self.counter}] Save designated inside-span attestation target checkpoint for Validator {validator_index}"
+                    f"[BEACON NODE {self.counter}] Save designated inside-span attestation target checkpoint for Validator {validator_index}"
                 )
                 self.attestation_target_inside_span[
                     validator_index
@@ -130,7 +130,7 @@ class AttesterSlashingWithinSpan(BeaconClient):
             > self.attestation_target_inside_span[validator_index].epoch
         ):
             print(
-                f"[BEACON CLIENT {self.counter}] Produce spanning attestation for Validator {validator_index}"
+                f"[BEACON NODE {self.counter}] Produce spanning attestation for Validator {validator_index}"
             )
             attestation_data.source = self.first_attestation[validator_index][0]
             return attestation_data

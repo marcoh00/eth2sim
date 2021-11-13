@@ -72,11 +72,11 @@ class AttestationCache:
         if attestation_block_root not in store.block_states:
             if raise_on_error:
                 raise ValueError(
-                    f"[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]"
+                    f"[BEACON NODE {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]"
                 )
             else:
                 print(
-                    f"[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]"
+                    f"[BEACON NODE {self.counter}][ATTESTATION CACHE] Received attestation for block not known to fork choice: root=[{attestation_block_root}] slot=[{attestation.data.slot}]"
                 )
                 if self.queued_attestations is None:
                     self.queued_attestations = Queue()
@@ -99,7 +99,7 @@ class AttestationCache:
                 ]
             else:
                 print(
-                    f"[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Attestation Cache needs to manually forward the state. epoch_block_slot=[{attestation_block_slot_epoch}] epoch_attestation_slot=[{attestation_slot_epoch}]"
+                    f"[BEACON NODE {self.counter}][ATTESTATION CACHE] Attestation Cache needs to manually forward the state. epoch_block_slot=[{attestation_block_slot_epoch}] epoch_attestation_slot=[{attestation_slot_epoch}]"
                 )
                 spec.process_slots(attestation_block_state, attestation.data.slot)
                 self.__ensure_key_exists(self.state_cache, attestation_slot_epoch, dict)
@@ -146,7 +146,7 @@ class AttestationCache:
                     attestation, store, raise_on_error=True, marker=marker
                 )
                 print(
-                    f"[BEACON CLIENT {self.counter}][ATTESTATION CACHE] Successfully added queued attestation into cache: root=[{attestation.data.beacon_block_root}] slot=[{attestation.data.slot}]"
+                    f"[BEACON NODE {self.counter}][ATTESTATION CACHE] Successfully added queued attestation into cache: root=[{attestation.data.beacon_block_root}] slot=[{attestation.data.slot}]"
                 )
             except ValueError:
                 unsuccessful.put((attestation, marker))

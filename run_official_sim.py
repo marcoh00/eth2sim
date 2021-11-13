@@ -31,7 +31,7 @@ def simulation0(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(4)\
+        .beacon_node(4)\
             .set_debug(True)\
             .validators(64)\
             .build()\
@@ -43,12 +43,12 @@ def simulation1(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(11)\
+        .beacon_node(11)\
             .set_debug(True)\
             .validators(21)\
             .build()\
         .build()\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .validators(25)\
             .build()\
@@ -60,7 +60,7 @@ def simulation2(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(128)\
+        .beacon_node(128)\
             .set_debug(True)\
             .validators(2)\
             .build()\
@@ -72,7 +72,7 @@ def simulation3(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(4)\
+        .beacon_node(4)\
             .set_debug(True)\
             .validators(2048)\
             .build()\
@@ -84,12 +84,12 @@ def simulation4(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(11)\
+        .beacon_node(11)\
             .set_debug(True)\
             .validators(682)\
             .build()\
         .build()\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .validators(690)\
             .build()\
@@ -101,7 +101,7 @@ def simulation5(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(128)\
+        .beacon_node(128)\
             .set_debug(True)\
             .validators(64)\
             .build()\
@@ -112,7 +112,7 @@ def simulation6(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(4)\
+        .beacon_node(4)\
             .set_debug(True)\
             .validators(4096)\
             .build()\
@@ -123,7 +123,7 @@ def simulation7(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(8)\
+        .beacon_node(8)\
             .set_debug(True)\
             .validators(2048)\
             .build()\
@@ -134,12 +134,12 @@ def simulation8(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(3)\
+        .beacon_node(3)\
             .set_debug(True)\
             .validators(33963)\
             .build()\
         .build()\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .validators(33962)\
             .build()\
@@ -150,12 +150,12 @@ def simulation9(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(7)\
+        .beacon_node(7)\
             .set_debug(True)\
             .validators(16981)\
             .build()\
         .build()\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .validators(16984)\
             .build()\
@@ -167,7 +167,7 @@ def simulation10(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 2)\
-        .beacon_client(32)\
+        .beacon_node(32)\
             .set_debug(True)\
             .validators(8)\
             .build()\
@@ -179,7 +179,7 @@ def simulation11(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
         .set_custom_latency_map(None, modifier=lambda latency: latency * 8)\
-        .beacon_client(32)\
+        .beacon_node(32)\
             .set_debug(True)\
             .validators(8)\
             .build()\
@@ -191,13 +191,13 @@ def simulation12(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=8))\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .set_mode('BlockSlashing')\
             .validators(32)\
             .build()\
         .build()\
-        .beacon_client(7)\
+        .beacon_node(7)\
             .set_debug(True)\
             .validators(32)\
             .build()\
@@ -209,19 +209,19 @@ def simulation13(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=8))\
         .set_custom_latency_map(None, modifier=lambda latency: latency // 2)\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .set_mode('AttesterSlashingSameHeight')\
             .validators(32)\
             .build()\
         .build()\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .set_mode('AttesterSlashingWithinSpan')\
             .validators(32)\
             .build()\
         .build()\
-        .beacon_client(6)\
+        .beacon_node(6)\
             .set_debug(True)\
             .validators(32)\
             .build()\
@@ -232,7 +232,7 @@ def simulation14(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(8)\
+        .beacon_node(8)\
             .set_debug(True)\
             .validators(32)\
             .build()\
@@ -243,7 +243,7 @@ def simulation15(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=13))\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .set_mode('TimeAttacked')\
             .set_attackinfo({
@@ -257,7 +257,7 @@ def simulation15(config, blockhash):
             .validators(32)\
             .build()\
         .build()\
-        .beacon_client(7)\
+        .beacon_node(7)\
             .set_debug(True)\
             .validators(32)\
             .build()\
@@ -269,13 +269,13 @@ def simulation16(config, blockhash):
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(calc_simtime(slot=1, epoch=4))\
         .set_custom_latency_map(((0, 0),))\
-        .beacon_client(1)\
+        .beacon_node(1)\
             .set_debug(True)\
             .set_mode('BalancingAttacking')\
             .validators(64)\
             .build()\
         .build()\
-        .beacon_client(16)\
+        .beacon_node(16)\
             .set_debug(True)\
             .validators(1)\
             .build()\
@@ -286,7 +286,7 @@ def simulation17(config, blockhash):
     # fmt: off
     return SimulationBuilder('../../configs', config, blockhash)\
         .set_end_time(1844674407370955161)\
-        .beacon_client(32)\
+        .beacon_node(32)\
             .set_debug(True)\
             .validators(8)\
             .build()\

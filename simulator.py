@@ -9,14 +9,14 @@ from remerkleable.basic import uint64
 from remerkleable.byte_arrays import ByteVector
 
 import eth2spec.phase0.spec as spec
-from beaconclient import BeaconClient
-from beaconclient_builder import BeaconClientBuilder
+from beaconnode import BeaconNode
+from beaconnode_builder import BeaconNodeBuilder
 from builder import Builder
 from eth2spec.phase0 import spec
 from eth2spec.test.helpers.deposits import build_deposit, build_deposit_data
 from events import (
     NextSlotEvent,
-    BeaconClientInfo,
+    BeaconNodeInfo,
     LatestVoteOpportunity,
     AggregateOpportunity,
     SimulationEndEvent,
@@ -33,9 +33,9 @@ from network import Network
 
 
 @dataclass
-class IndexedBeaconClient(object):
+class IndexedBeaconNode(object):
     queue: JoinableQueue
-    beacon_client: BeaconClient
+    beacon_node: BeaconNode
 
 
 class Simulator:
@@ -46,7 +46,7 @@ class Simulator:
     simulator_time: uint64
     simulator_prio: int
     slot: spec.Slot
-    clients: List[IndexedBeaconClient]
+    clients: List[IndexedBeaconNode]
     network: Network
     events: queue.Queue[Event]
     past_events: List[Event]
@@ -131,13 +131,13 @@ class Simulator:
         deposits = []
 
         print(
-            f"[SIMULATOR] Generate Genesis state ({sum(len(client.beacon_client.validators) for client in self.clients)} validators)"
+            f"[SIMULATOR] Generate Genesis state ({sum(len(client.beacon_node.validators) for client in self.clients)} validators)"
         )
         validatorno = 0
         start_time = datetime.datetime.now()
         eth1_timestamp = spec.MIN_GENESIS_TIME
         for client in self.clients:
-            for validator in client.beacon_client.validators:
+            for validator in client.beacon_node.validators:
                 if validatorno % 1000 == 0:
                     print(f"[SIMULATOR][Deposit] Create deposit #{validatorno}")
                 if mocked:
@@ -198,7 +198,7 @@ class Simulator:
                 fp.write(self.genesis_block.encode_bytes())
 
     @staticmethod
-    def __obtain_validator_range(client: BeaconClient) -> Union[Tuple[int, int], None]:
+    def __obtain_validator_range(client: BeaconNode) -> Union[Tuple[int, int], None]:
         no_validators = len(client.validators)
         if no_validators == 0:
             return None
@@ -207,18 +207,18 @@ class Simulator:
         else:
             return client.validators[0].counter, client.validators[-1].counter
 
-    def beacon_client_info(self) -> Dict[int, List[int]]:
-        beacon_clients = dict()
+    def beacon_node_info(self) -> Dict[int, List[int]]:
+        beacon_nodes = dict()
         for client in self.clients:
-            beacon_clients[client.beacon_client.counter] = list()
-            for validator in client.beacon_client.validators:
-                beacon_clients[client.beacon_client.counter].append(validator.counter)
-        return beacon_clients
+            beacon_nodes[client.beacon_node.counter] = list()
+            for validator in client.beacon_node.validators:
+                beacon_nodes[client.beacon_node.counter].append(validator.counter)
+        return beacon_nodes
 
     def initialize_clients(self):
         encoded_state = self.genesis_state.encode_bytes()
         encoded_block = self.genesis_block.encode_bytes()
-        beacon_client_info = self.beacon_client_info()
+        beacon_node_info = self.beacon_node_info()
         print(
             "[SIMULATOR] state_root={} block_root={}".format(
                 spec.hash_tree_root(self.genesis_state),
@@ -230,20 +230,20 @@ class Simulator:
             # Delete all validators inside the client and tell it to initialize them again
             # This is a lot faster than serializing the existing validator objects and sending them
             # over to the newly created process
-            client.beacon_client.validators = []
-            client.beacon_client.start()
+            client.beacon_node.validators = []
+            client.beacon_node.start()
 
-            print(f"[SIMULATOR] Beacon Client {client.beacon_client.counter} started")
+            print(f"[SIMULATOR] Beacon Node {client.beacon_node.counter} started")
             client.queue.put(
                 ValidatorInitializationEvent(
                     time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY), priority=0
                 )
             )
             client.queue.put(
-                BeaconClientInfo(
+                BeaconNodeInfo(
                     time=uint64(spec.MIN_GENESIS_TIME + spec.GENESIS_DELAY),
                     priority=5,
-                    beacon_clients=beacon_client_info,
+                    beacon_nodes=beacon_node_info,
                 )
             )
             client.queue.put(
@@ -308,7 +308,7 @@ class Simulator:
     def __recv_message_event(self, event: MessageEvent):
         if event.message_type == "SignedBeaconBlock":
             print(
-                f"[{int(datetime.datetime.now().timestamp())}] Block Message {id(event)} by Beacon Client {event.fromidx}"
+                f"[{int(datetime.datetime.now().timestamp())}] Block Message {id(event)} by Beacon Node {event.fromidx}"
             )
         if event.toidx is not None:
             self.network.delay(event)
@@ -330,7 +330,7 @@ class Simulator:
     def __recv_end_event(self, event: SimulationEndEvent):
         for validator in self.clients:
             validator.queue.put(event)
-            validator.beacon_client.join()
+            validator.beacon_node.join()
         if event.message:
             print(f"---------- !!!!! {event.message} !!!!! ----------")
         self.should_quit = True
@@ -456,11 +456,11 @@ class SimulationBuilder(Builder):
     ] = None
     latency_modifier: Callable[[int], int]
 
-    beacon_client_builders: List[BeaconClientBuilder]
+    beacon_node_builders: List[BeaconNodeBuilder]
 
     def __init__(self, configpath, configname, rand, parent_builder=None):
         super(SimulationBuilder, self).__init__(parent_builder)
-        self.beacon_client_builders = []
+        self.beacon_node_builders = []
         self.configpath = configpath
         self.configname = configname
         self.rand = rand
@@ -470,9 +470,9 @@ class SimulationBuilder(Builder):
         self.custom_latency_map = None
         self.latency_modifier = None
 
-    def beacon_client(self, count):
+    def beacon_node(self, count):
         self.current_child_count = count
-        return BeaconClientBuilder(
+        return BeaconNodeBuilder(
             self.configpath, self.configname, parent_builder=self
         )
 
@@ -482,21 +482,21 @@ class SimulationBuilder(Builder):
         client_counter = 0
         validator_counter = 0
         clients = list()
-        for client_builder in self.beacon_client_builders:
+        for client_builder in self.beacon_node_builders:
             simulator_to_client_queue = JoinableQueue()
             client_builder.neccessary_information(
                 validator_counter, client_to_simulator_queue
             )
             client = client_builder.build(callback=False, counter=client_counter)
-            indexed_client = IndexedBeaconClient(
-                queue=simulator_to_client_queue, beacon_client=client
+            indexed_client = IndexedBeaconNode(
+                queue=simulator_to_client_queue, beacon_node=client
             )
-            indexed_client.beacon_client.simulator_to_client_queue = (
+            indexed_client.beacon_node.simulator_to_client_queue = (
                 simulator_to_client_queue
             )
             clients.append(indexed_client)
             client_counter += 1
-            validator_counter += len(indexed_client.beacon_client.validators)
+            validator_counter += len(indexed_client.beacon_node.validators)
         simulator = Simulator(self.rand, self.custom_latency_map, self.latency_modifier)
         simulator.queue = client_to_simulator_queue
         simulator.clients = clients
@@ -533,4 +533,4 @@ class SimulationBuilder(Builder):
 
     def register(self, child_builder):
         for _ in range(self.current_child_count):
-            self.beacon_client_builders.append(child_builder)
+            self.beacon_node_builders.append(child_builder)

@@ -41,8 +41,8 @@ class ValidatorInitializationEvent(Event):
 
 
 @dataclass
-class BeaconClientInfo(Event):
-    beacon_clients: Dict[int, List[int]]
+class BeaconNodeInfo(Event):
+    beacon_nodes: Dict[int, List[int]]
 
 
 @dataclass
